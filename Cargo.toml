@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 winit = "0.26.0"
+ash = "0.33.3+1.2.191"
