@@ -1,6 +1,6 @@
 use std::{error::Error, ffi::{CStr, CString}};
 
-use ash::{vk, Entry, Instance};
+use ash::{vk, Entry, Instance, extensions::ext::DebugUtils};
 
 pub struct VkRsApp {
     _entry: Entry,
@@ -37,20 +37,24 @@ impl VkRsApp {
         Ok(true)
     }
 
-    pub fn new() -> Result<Self, Box<dyn Error>> {
+    pub fn new(mut required_extensions: Vec<&CStr>) -> Result<Self, Box<dyn Error>> {
         // Init Vulkan
         // Ash loads Vulkan dynamically, ash::Entry is the library loader and the entrypoint into the Vulkan API.
         // In the future, Ash should also support loading Vulkan as a static library.
         let entry = unsafe { Entry::new() }?;
 
         let validation_layers = ["VK_LAYER_KHRONOS_validation"];
-        let enable_validation_layers = Self::check_validation_layers_support(&entry, &validation_layers)?;
+        let enable_validation_layers = cfg!(debug_assertions) && Self::check_validation_layers_support(&entry, &validation_layers)?;
         
         #[cfg(debug_assertions)]
         if enable_validation_layers {
             println!("Validation layers available.");
         } else {
-            println!("Validation layers not avaialable.");
+            println!("Validation layers not available.");
+        }
+
+        if enable_validation_layers {
+            required_extensions.push(DebugUtils::name());
         }
 
         let app_info = vk::ApplicationInfo {
@@ -59,16 +63,21 @@ impl VkRsApp {
         };
         let enabled_layer_names = validation_layers.iter().map(|l| CString::new(*l).unwrap()).collect::<Vec<CString>>();
         let p_enabled_layer_names = enabled_layer_names.iter().map(|l| l.as_ptr()).collect::<Vec<*const i8>>();
+        let p_enabled_extension_names = required_extensions.iter().map(|e| e.as_ptr()).collect::<Vec<*const i8>>();
         let create_info = if enable_validation_layers {
                 vk::InstanceCreateInfo {
                     p_application_info: &app_info,
                     enabled_layer_count: validation_layers.len() as u32,
                     pp_enabled_layer_names: p_enabled_layer_names.as_ptr(),
+                    enabled_extension_count: required_extensions.len() as u32,
+                    pp_enabled_extension_names: p_enabled_extension_names.as_ptr(),
                     ..Default::default()
                 }
             } else {
                 vk::InstanceCreateInfo {
                     p_application_info: &app_info,
+                    enabled_extension_count: required_extensions.len() as u32,
+                    pp_enabled_extension_names: p_enabled_extension_names.as_ptr(),
                     ..Default::default()
                 }
             };

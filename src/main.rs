@@ -4,6 +4,7 @@ mod vk_rs_app;
 
 use std::error::Error;
 
+use ash_window::enumerate_required_extensions;
 use winit::{
     dpi::LogicalSize,
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
@@ -11,18 +12,19 @@ use winit::{
     window::{WindowBuilder},
 };
 
-use vk_rs_app::VkRsApp;
+use vk_rs_app::{VkRsApp};
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Init Window
     let event_loop = EventLoop::new();
-    let _window = WindowBuilder::new()
+    let window = WindowBuilder::new()
         .with_title("vk-rs")
         .with_inner_size(LogicalSize::new(800, 600))
         .build(&event_loop)?;
     
     // Init App (including Vulkan)
-    let mut vk_rs_app = VkRsApp::new()?;
+    let required_extensions = enumerate_required_extensions(&window)?;
+    let mut vk_rs_app = VkRsApp::new(required_extensions)?;
     
     // Main Loop
     event_loop.run(move |event, _, control_flow| {
