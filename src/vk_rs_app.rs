@@ -43,8 +43,27 @@ unsafe extern "system" fn vk_debug_utils_callback (
 }
 
 impl VkRsApp {
+    fn pick_physical_device(instance: &Instance) -> Result<vk::PhysicalDevice, Box<dyn Error>> {
+        let physical_devices = unsafe { instance.enumerate_physical_devices() }?;
+
+        for physical_device in physical_devices.iter() {
+            let device_properties = unsafe { instance.get_physical_device_properties(*physical_device) };
+            let device_features = unsafe { instance.get_physical_device_features(*physical_device) };
+
+            if device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU &&
+                    device_features.geometry_shader == vk::TRUE {
+                let device_name = unsafe { CStr::from_ptr(device_properties.device_name.as_ptr()).to_str().to_owned() }?;
+                println!("Found suitable device : {} !", device_name);
+            
+                return Ok(*physical_device)
+            }
+        }
+
+        Err("No suitable device found !")?
+    }
+
     #[cfg(debug_assertions)]
-    fn check_validation_layers_support(entry: &ash::Entry, layer_names: &[&str]) -> Result<bool, Box<dyn Error>> {
+    fn check_validation_layers_support(entry: &Entry, layer_names: &[&str]) -> Result<bool, Box<dyn Error>> {
         let available_layers_properties = entry.enumerate_instance_layer_properties()?;
 
         println!("Available Vulkan layers :");
@@ -123,6 +142,8 @@ impl VkRsApp {
                 ..Default::default()
             };
             let debug_utils_messenger = unsafe { debug_utils_loader.create_debug_utils_messenger(&messenger_create_info, None) }?;
+
+            let _physical_device = Self::pick_physical_device(&instance)?;
 
             return Ok(VkRsApp {
                 // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
