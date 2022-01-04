@@ -9,10 +9,10 @@ use winit::{
     dpi::LogicalSize,
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::{WindowBuilder},
+    window::WindowBuilder,
 };
 
-use vk_rs_app::{VkRsApp};
+use vk_rs_app::VkRsApp;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Init Window
@@ -21,20 +21,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_title("vk-rs")
         .with_inner_size(LogicalSize::new(800, 600))
         .build(&event_loop)?;
-    
+
     // Init App (including Vulkan)
     let required_extensions = enumerate_required_extensions(&window)?;
     let mut vk_rs_app = VkRsApp::new(required_extensions)?;
-    
+
     // Main Loop
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 
         match event {
             Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested => {
-                    *control_flow = ControlFlow::Exit
-                }
+                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 WindowEvent::KeyboardInput { input, .. } => match input {
                     KeyboardInput {
                         state,
