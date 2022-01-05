@@ -3,14 +3,26 @@ use std::ffi::{c_void, CString};
 use std::{error::Error, ffi::CStr};
 
 #[cfg(debug_assertions)]
-use ash::{extensions::ext::DebugUtils, vk::DebugUtilsMessengerEXT};
+use ash::extensions::ext::DebugUtils;
 use ash::{vk, Entry, Instance};
+
+#[derive(Default)]
+struct QueueFamilyIndices {
+    graphics_family: Option<u32>,
+}
+
+impl QueueFamilyIndices {
+    pub fn is_complete(&self) -> bool {
+        self.graphics_family.is_some()
+    }
+}
 
 pub struct VkRsApp {
     _entry: Entry,
     instance: Instance,
+    _physical_device: vk::PhysicalDevice,
     #[cfg(debug_assertions)]
-    debug_utils: Option<(DebugUtils, DebugUtilsMessengerEXT)>,
+    debug_utils: Option<(DebugUtils, vk::DebugUtilsMessengerEXT)>,
 }
 
 #[cfg(debug_assertions)]
@@ -46,23 +58,48 @@ impl VkRsApp {
     fn pick_physical_device(instance: &Instance) -> Result<vk::PhysicalDevice, Box<dyn Error>> {
         let physical_devices = unsafe { instance.enumerate_physical_devices() }?;
 
-        for physical_device in physical_devices.iter() {
+        for &physical_device in physical_devices.iter() {
             let device_properties =
-                unsafe { instance.get_physical_device_properties(*physical_device) };
-            let device_features =
-                unsafe { instance.get_physical_device_features(*physical_device) };
+                unsafe { instance.get_physical_device_properties(physical_device) };
+            let device_features = unsafe { instance.get_physical_device_features(physical_device) };
+
+            // Vulkan commands are submitted in queues. There are multiple families of queues and each family allows certain commands.
+            // We need to find the indices of the queue families that allow the commands we need.
+            let device_queue_families_properties =
+                unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
+            let mut device_queue_family_indices = QueueFamilyIndices::default();
+            let mut index = 0;
+            for device_queue_family_property in device_queue_families_properties.iter() {
+                if device_queue_family_property.queue_count > 0
+                    && device_queue_family_property
+                        .queue_flags
+                        .contains(vk::QueueFlags::GRAPHICS)
+                {
+                    device_queue_family_indices.graphics_family = Some(index);
+                }
+                if device_queue_family_indices.is_complete() {
+                    break;
+                }
+
+                index += 1;
+            }
 
             if device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU
                 && device_features.geometry_shader == vk::TRUE
+                && device_queue_family_indices.is_complete()
             {
-                let device_name = unsafe {
-                    CStr::from_ptr(device_properties.device_name.as_ptr())
-                        .to_str()
-                        .to_owned()
-                }?;
-                println!("Found suitable device : {} !", device_name);
+                #[cfg(debug_assertions)]
+                {
+                    let device_name = unsafe {
+                        CStr::from_ptr(device_properties.device_name.as_ptr())
+                            .to_str()
+                            .to_owned()
+                    }?;
 
-                return Ok(*physical_device);
+                    println!("Found suitable device : {} !", device_name);
+                }
+
+                return Ok(physical_device);
             }
         }
 
@@ -219,12 +256,13 @@ impl VkRsApp {
             instance = unsafe { entry.create_instance(&create_info, None) }?;
         }
 
-        let _physical_device = Self::pick_physical_device(&instance)?;
+        let physical_device = Self::pick_physical_device(&instance)?;
 
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
             _entry: entry,
             instance,
+            _physical_device: physical_device,
             #[cfg(debug_assertions)]
             debug_utils,
         })
