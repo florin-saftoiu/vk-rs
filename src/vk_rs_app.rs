@@ -4,7 +4,7 @@ use std::{error::Error, ffi::CStr};
 
 #[cfg(debug_assertions)]
 use ash::extensions::ext::DebugUtils;
-use ash::{vk, Entry, Instance};
+use ash::{vk, Device, Entry, Instance};
 
 #[derive(Default)]
 struct QueueFamilyIndices {
@@ -21,6 +21,7 @@ pub struct VkRsApp {
     _entry: Entry,
     instance: Instance,
     _physical_device: vk::PhysicalDevice,
+    _device: Device,
     #[cfg(debug_assertions)]
     debug_utils: Option<(DebugUtils, vk::DebugUtilsMessengerEXT)>,
 }
@@ -55,6 +56,33 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
+    fn find_queue_families(
+        instance: &Instance,
+        physical_device: vk::PhysicalDevice,
+    ) -> QueueFamilyIndices {
+        // Vulkan commands are submitted in queues. There are multiple families of queues and each family allows certain commands.
+        // We need to find the indices of the queue families that allow the commands we need.
+        let device_queue_families_properties =
+            unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
+        let mut device_queue_family_indices = QueueFamilyIndices::default();
+        let mut index = 0;
+        for device_queue_family_property in device_queue_families_properties.iter() {
+            if device_queue_family_property.queue_count > 0
+                && device_queue_family_property
+                    .queue_flags
+                    .contains(vk::QueueFlags::GRAPHICS)
+            {
+                device_queue_family_indices.graphics_family = Some(index);
+            }
+            if device_queue_family_indices.is_complete() {
+                break;
+            }
+
+            index += 1;
+        }
+        device_queue_family_indices
+    }
+
     fn pick_physical_device(instance: &Instance) -> Result<vk::PhysicalDevice, Box<dyn Error>> {
         let physical_devices = unsafe { instance.enumerate_physical_devices() }?;
 
@@ -62,27 +90,7 @@ impl VkRsApp {
             let device_properties =
                 unsafe { instance.get_physical_device_properties(physical_device) };
             let device_features = unsafe { instance.get_physical_device_features(physical_device) };
-
-            // Vulkan commands are submitted in queues. There are multiple families of queues and each family allows certain commands.
-            // We need to find the indices of the queue families that allow the commands we need.
-            let device_queue_families_properties =
-                unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
-            let mut device_queue_family_indices = QueueFamilyIndices::default();
-            let mut index = 0;
-            for device_queue_family_property in device_queue_families_properties.iter() {
-                if device_queue_family_property.queue_count > 0
-                    && device_queue_family_property
-                        .queue_flags
-                        .contains(vk::QueueFlags::GRAPHICS)
-                {
-                    device_queue_family_indices.graphics_family = Some(index);
-                }
-                if device_queue_family_indices.is_complete() {
-                    break;
-                }
-
-                index += 1;
-            }
+            let device_queue_family_indices = Self::find_queue_families(instance, physical_device);
 
             if device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU
                 && device_features.geometry_shader == vk::TRUE
@@ -104,6 +112,83 @@ impl VkRsApp {
         }
 
         Err("No suitable device found !")?
+    }
+
+    fn create_logical_device(
+        #[cfg(debug_assertions)] entry: &Entry,
+        instance: &Instance,
+        physical_device: vk::PhysicalDevice,
+    ) -> Result<Device, Box<dyn Error>> {
+        let device_queue_family_indices = Self::find_queue_families(instance, physical_device);
+        if let Some(graphics_family_index) = device_queue_family_indices.graphics_family {
+            let queue_priority = 1.0f32;
+            let device_queue_create_info = vk::DeviceQueueCreateInfo {
+                queue_family_index: graphics_family_index,
+                queue_count: 1,
+                p_queue_priorities: &queue_priority,
+                ..Default::default()
+            };
+            let device_features = vk::PhysicalDeviceFeatures {
+                ..Default::default()
+            };
+
+            let device_create_info;
+
+            #[cfg(debug_assertions)]
+            {
+                let validation_layers = ["VK_LAYER_KHRONOS_validation"];
+                let enable_validation_layers =
+                    Self::check_validation_layers_support(&entry, &validation_layers)?;
+
+                if enable_validation_layers {
+                    let enabled_layer_names = validation_layers
+                        .iter()
+                        .map(|l| CString::new(*l).unwrap())
+                        .collect::<Vec<CString>>();
+                    let p_enabled_layer_names = enabled_layer_names
+                        .iter()
+                        .map(|l| l.as_ptr())
+                        .collect::<Vec<*const i8>>();
+
+                    device_create_info = vk::DeviceCreateInfo {
+                        p_queue_create_infos: &device_queue_create_info,
+                        queue_create_info_count: 1,
+                        p_enabled_features: &device_features,
+                        enabled_extension_count: 0,
+                        enabled_layer_count: validation_layers.len() as u32,
+                        pp_enabled_layer_names: p_enabled_layer_names.as_ptr(),
+                        ..Default::default()
+                    };
+                } else {
+                    device_create_info = vk::DeviceCreateInfo {
+                        p_queue_create_infos: &device_queue_create_info,
+                        queue_create_info_count: 1,
+                        p_enabled_features: &device_features,
+                        enabled_extension_count: 0,
+                        enabled_layer_count: 0,
+                        ..Default::default()
+                    };
+                }
+            }
+
+            #[cfg(not(debug_assertions))]
+            {
+                device_create_info = vk::DeviceCreateInfo {
+                    p_queue_create_infos: &device_queue_create_info,
+                    queue_create_info_count: 1,
+                    p_enabled_features: &device_features,
+                    enabled_extension_count: 0,
+                    enabled_layer_count: 0,
+                    ..Default::default()
+                };
+            }
+
+            let device =
+                unsafe { instance.create_device(physical_device, &device_create_info, None) }?;
+            return Ok(device);
+        }
+
+        Err("Missing queue family indices !")?
     }
 
     #[cfg(debug_assertions)]
@@ -257,12 +342,19 @@ impl VkRsApp {
         }
 
         let physical_device = Self::pick_physical_device(&instance)?;
+        let device = Self::create_logical_device(
+            #[cfg(debug_assertions)]
+            &entry,
+            &instance,
+            physical_device,
+        )?;
 
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
             _entry: entry,
             instance,
             _physical_device: physical_device,
+            _device: device,
             #[cfg(debug_assertions)]
             debug_utils,
         })
