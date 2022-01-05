@@ -25,6 +25,7 @@ pub struct VkRsApp {
     instance: Instance,
     _physical_device: vk::PhysicalDevice,
     device: Device,
+    _graphics_queue: vk::Queue,
     #[cfg(debug_assertions)]
     debug_utils: Option<(DebugUtils, vk::DebugUtilsMessengerEXT)>,
 }
@@ -121,7 +122,7 @@ impl VkRsApp {
         #[cfg(debug_assertions)] enable_validation_layers: bool,
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
-    ) -> Result<Device, Box<dyn Error>> {
+    ) -> Result<(Device, vk::Queue), Box<dyn Error>> {
         let device_queue_family_indices = Self::find_queue_families(instance, physical_device);
         if let Some(graphics_family_index) = device_queue_family_indices.graphics_family {
             let queue_priority = 1.0f32;
@@ -186,7 +187,12 @@ impl VkRsApp {
                 unsafe { instance.create_device(physical_device, &device_create_info, None) }?;
             #[cfg(debug_assertions)]
             println!("Logical device created.");
-            return Ok(device);
+
+            let graphics_queue = unsafe { device.get_device_queue(graphics_family_index, 0) };
+            #[cfg(debug_assertions)]
+            println!("Graphics queue handle retrieved.");
+
+            return Ok((device, graphics_queue));
         }
 
         Err("Missing queue family indices !")?
@@ -342,7 +348,7 @@ impl VkRsApp {
         }
 
         let physical_device = Self::pick_physical_device(&instance)?;
-        let device = Self::create_logical_device(
+        let (device, graphics_queue) = Self::create_logical_device(
             #[cfg(debug_assertions)]
             enable_validation_layers,
             &instance,
@@ -355,6 +361,7 @@ impl VkRsApp {
             instance,
             _physical_device: physical_device,
             device,
+            _graphics_queue: graphics_queue,
             #[cfg(debug_assertions)]
             debug_utils,
         })
