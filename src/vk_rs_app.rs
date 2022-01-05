@@ -6,6 +6,9 @@ use std::{error::Error, ffi::CStr};
 use ash::extensions::ext::DebugUtils;
 use ash::{vk, Device, Entry, Instance};
 
+#[cfg(debug_assertions)]
+const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
+
 #[derive(Default)]
 struct QueueFamilyIndices {
     graphics_family: Option<u32>,
@@ -21,7 +24,7 @@ pub struct VkRsApp {
     _entry: Entry,
     instance: Instance,
     _physical_device: vk::PhysicalDevice,
-    _device: Device,
+    device: Device,
     #[cfg(debug_assertions)]
     debug_utils: Option<(DebugUtils, vk::DebugUtilsMessengerEXT)>,
 }
@@ -115,7 +118,7 @@ impl VkRsApp {
     }
 
     fn create_logical_device(
-        #[cfg(debug_assertions)] entry: &Entry,
+        #[cfg(debug_assertions)] enable_validation_layers: bool,
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
     ) -> Result<Device, Box<dyn Error>> {
@@ -136,12 +139,8 @@ impl VkRsApp {
 
             #[cfg(debug_assertions)]
             {
-                let validation_layers = ["VK_LAYER_KHRONOS_validation"];
-                let enable_validation_layers =
-                    Self::check_validation_layers_support(&entry, &validation_layers)?;
-
                 if enable_validation_layers {
-                    let enabled_layer_names = validation_layers
+                    let enabled_layer_names = VALIDATION_LAYERS
                         .iter()
                         .map(|l| CString::new(*l).unwrap())
                         .collect::<Vec<CString>>();
@@ -155,7 +154,7 @@ impl VkRsApp {
                         queue_create_info_count: 1,
                         p_enabled_features: &device_features,
                         enabled_extension_count: 0,
-                        enabled_layer_count: validation_layers.len() as u32,
+                        enabled_layer_count: p_enabled_layer_names.len() as u32,
                         pp_enabled_layer_names: p_enabled_layer_names.as_ptr(),
                         ..Default::default()
                     };
@@ -185,6 +184,8 @@ impl VkRsApp {
 
             let device =
                 unsafe { instance.create_device(physical_device, &device_create_info, None) }?;
+            #[cfg(debug_assertions)]
+            println!("Logical device created.");
             return Ok(device);
         }
 
@@ -243,13 +244,12 @@ impl VkRsApp {
         let instance;
         #[cfg(debug_assertions)]
         let debug_utils;
+        #[cfg(debug_assertions)]
+        let enable_validation_layers =
+            Self::check_validation_layers_support(&entry, &VALIDATION_LAYERS)?;
 
         #[cfg(debug_assertions)]
         {
-            let validation_layers = ["VK_LAYER_KHRONOS_validation"];
-            let enable_validation_layers =
-                Self::check_validation_layers_support(&entry, &validation_layers)?;
-
             if enable_validation_layers {
                 println!("Validation layers available.");
 
@@ -260,7 +260,7 @@ impl VkRsApp {
                     .map(|e| e.as_ptr())
                     .collect::<Vec<*const i8>>();
 
-                let enabled_layer_names = validation_layers
+                let enabled_layer_names = VALIDATION_LAYERS
                     .iter()
                     .map(|l| CString::new(*l).unwrap())
                     .collect::<Vec<CString>>();
@@ -282,7 +282,7 @@ impl VkRsApp {
                         as *const vk::DebugUtilsMessengerCreateInfoEXT
                         as *const c_void,
                     p_application_info: &app_info,
-                    enabled_layer_count: validation_layers.len() as u32,
+                    enabled_layer_count: p_enabled_layer_names.len() as u32,
                     pp_enabled_layer_names: p_enabled_layer_names.as_ptr(),
                     enabled_extension_count: enabled_extension_names.len() as u32,
                     pp_enabled_extension_names: p_enabled_extension_names.as_ptr(),
@@ -344,7 +344,7 @@ impl VkRsApp {
         let physical_device = Self::pick_physical_device(&instance)?;
         let device = Self::create_logical_device(
             #[cfg(debug_assertions)]
-            &entry,
+            enable_validation_layers,
             &instance,
             physical_device,
         )?;
@@ -354,7 +354,7 @@ impl VkRsApp {
             _entry: entry,
             instance,
             _physical_device: physical_device,
-            _device: device,
+            device,
             #[cfg(debug_assertions)]
             debug_utils,
         })
@@ -365,6 +365,8 @@ impl VkRsApp {
 
 impl Drop for VkRsApp {
     fn drop(&mut self) {
+        unsafe { self.device.destroy_device(None) };
+
         #[cfg(debug_assertions)]
         if let Some((debug_utils_loader, debug_utils_messenger)) = &self.debug_utils {
             unsafe {
