@@ -1,10 +1,10 @@
+use std::error::Error;
 #[cfg(debug_assertions)]
-use std::ffi::{c_void, CString};
-use std::{error::Error, ffi::CStr};
+use std::ffi::{c_void, CStr, CString};
 
 #[cfg(debug_assertions)]
 use ash::extensions::ext::DebugUtils;
-use ash::{vk, Device, Entry, Instance};
+use ash::{extensions::khr::Surface, vk, Device, Entry, Instance};
 
 #[cfg(debug_assertions)]
 const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
@@ -12,22 +12,25 @@ const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
 #[derive(Default)]
 struct QueueFamilyIndices {
     graphics_family: Option<u32>,
+    present_family: Option<u32>,
 }
 
 impl QueueFamilyIndices {
     pub fn is_complete(&self) -> bool {
-        self.graphics_family.is_some()
+        self.graphics_family.is_some() && self.present_family.is_some()
     }
 }
 
 pub struct VkRsApp {
     _entry: Entry,
     instance: Instance,
-    _physical_device: vk::PhysicalDevice,
-    device: Device,
-    _graphics_queue: vk::Queue,
     #[cfg(debug_assertions)]
     debug_utils: Option<(DebugUtils, vk::DebugUtilsMessengerEXT)>,
+    _physical_device: vk::PhysicalDevice,
+    surface: (vk::SurfaceKHR, Surface),
+    device: Device,
+    _graphics_queue: vk::Queue,
+    _present_queue: vk::Queue,
 }
 
 #[cfg(debug_assertions)]
@@ -63,7 +66,9 @@ impl VkRsApp {
     fn find_queue_families(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
-    ) -> QueueFamilyIndices {
+        surface: vk::SurfaceKHR,
+        surface_loader: &Surface,
+    ) -> Result<QueueFamilyIndices, Box<dyn Error>> {
         // Vulkan commands are submitted in queues. There are multiple families of queues and each family allows certain commands.
         // We need to find the indices of the queue families that allow the commands we need.
         let device_queue_families_properties =
@@ -78,23 +83,41 @@ impl VkRsApp {
             {
                 device_queue_family_indices.graphics_family = Some(index);
             }
+
+            if device_queue_family_property.queue_count > 0
+                && unsafe {
+                    surface_loader.get_physical_device_surface_support(
+                        physical_device,
+                        index as u32,
+                        surface,
+                    )
+                }?
+            {
+                device_queue_family_indices.present_family = Some(index);
+            }
+
             if device_queue_family_indices.is_complete() {
                 break;
             }
 
             index += 1;
         }
-        device_queue_family_indices
+        Ok(device_queue_family_indices)
     }
 
-    fn pick_physical_device(instance: &Instance) -> Result<vk::PhysicalDevice, Box<dyn Error>> {
+    fn pick_physical_device(
+        instance: &Instance,
+        surface: vk::SurfaceKHR,
+        surface_loader: &Surface,
+    ) -> Result<(vk::PhysicalDevice, QueueFamilyIndices), Box<dyn Error>> {
         let physical_devices = unsafe { instance.enumerate_physical_devices() }?;
 
         for &physical_device in physical_devices.iter() {
             let device_properties =
                 unsafe { instance.get_physical_device_properties(physical_device) };
             let device_features = unsafe { instance.get_physical_device_features(physical_device) };
-            let device_queue_family_indices = Self::find_queue_families(instance, physical_device);
+            let device_queue_family_indices =
+                Self::find_queue_families(instance, physical_device, surface, surface_loader)?;
 
             if device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU
                 && device_features.geometry_shader == vk::TRUE
@@ -111,7 +134,7 @@ impl VkRsApp {
                     println!("Found suitable device : {} !", device_name);
                 }
 
-                return Ok(physical_device);
+                return Ok((physical_device, device_queue_family_indices));
             }
         }
 
@@ -122,57 +145,45 @@ impl VkRsApp {
         #[cfg(debug_assertions)] enable_validation_layers: bool,
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
-    ) -> Result<(Device, vk::Queue), Box<dyn Error>> {
-        let device_queue_family_indices = Self::find_queue_families(instance, physical_device);
-        if let Some(graphics_family_index) = device_queue_family_indices.graphics_family {
-            let queue_priority = 1.0f32;
-            let device_queue_create_info = vk::DeviceQueueCreateInfo {
-                queue_family_index: graphics_family_index,
-                queue_count: 1,
-                p_queue_priorities: &queue_priority,
-                ..Default::default()
-            };
-            let device_features = vk::PhysicalDeviceFeatures {
-                ..Default::default()
-            };
+        device_queue_family_indices: &QueueFamilyIndices,
+    ) -> Result<Device, Box<dyn Error>> {
+        let queue_priority = 1.0f32;
+        let device_queue_create_info = vk::DeviceQueueCreateInfo {
+            queue_family_index: device_queue_family_indices
+                .graphics_family
+                .expect("Missing graphics queue family index !"),
+            queue_count: 1,
+            p_queue_priorities: &queue_priority,
+            ..Default::default()
+        };
+        let device_features = vk::PhysicalDeviceFeatures {
+            ..Default::default()
+        };
 
-            let device_create_info;
+        let device_create_info;
 
-            #[cfg(debug_assertions)]
-            {
-                if enable_validation_layers {
-                    let enabled_layer_names = VALIDATION_LAYERS
-                        .iter()
-                        .map(|l| CString::new(*l).unwrap())
-                        .collect::<Vec<CString>>();
-                    let p_enabled_layer_names = enabled_layer_names
-                        .iter()
-                        .map(|l| l.as_ptr())
-                        .collect::<Vec<*const i8>>();
+        #[cfg(debug_assertions)]
+        {
+            if enable_validation_layers {
+                let enabled_layer_names = VALIDATION_LAYERS
+                    .iter()
+                    .map(|l| CString::new(*l).unwrap())
+                    .collect::<Vec<CString>>();
+                let p_enabled_layer_names = enabled_layer_names
+                    .iter()
+                    .map(|l| l.as_ptr())
+                    .collect::<Vec<*const i8>>();
 
-                    device_create_info = vk::DeviceCreateInfo {
-                        p_queue_create_infos: &device_queue_create_info,
-                        queue_create_info_count: 1,
-                        p_enabled_features: &device_features,
-                        enabled_extension_count: 0,
-                        enabled_layer_count: p_enabled_layer_names.len() as u32,
-                        pp_enabled_layer_names: p_enabled_layer_names.as_ptr(),
-                        ..Default::default()
-                    };
-                } else {
-                    device_create_info = vk::DeviceCreateInfo {
-                        p_queue_create_infos: &device_queue_create_info,
-                        queue_create_info_count: 1,
-                        p_enabled_features: &device_features,
-                        enabled_extension_count: 0,
-                        enabled_layer_count: 0,
-                        ..Default::default()
-                    };
-                }
-            }
-
-            #[cfg(not(debug_assertions))]
-            {
+                device_create_info = vk::DeviceCreateInfo {
+                    p_queue_create_infos: &device_queue_create_info,
+                    queue_create_info_count: 1,
+                    p_enabled_features: &device_features,
+                    enabled_extension_count: 0,
+                    enabled_layer_count: p_enabled_layer_names.len() as u32,
+                    pp_enabled_layer_names: p_enabled_layer_names.as_ptr(),
+                    ..Default::default()
+                };
+            } else {
                 device_create_info = vk::DeviceCreateInfo {
                     p_queue_create_infos: &device_queue_create_info,
                     queue_create_info_count: 1,
@@ -182,20 +193,25 @@ impl VkRsApp {
                     ..Default::default()
                 };
             }
-
-            let device =
-                unsafe { instance.create_device(physical_device, &device_create_info, None) }?;
-            #[cfg(debug_assertions)]
-            println!("Logical device created.");
-
-            let graphics_queue = unsafe { device.get_device_queue(graphics_family_index, 0) };
-            #[cfg(debug_assertions)]
-            println!("Graphics queue handle retrieved.");
-
-            return Ok((device, graphics_queue));
         }
 
-        Err("Missing queue family indices !")?
+        #[cfg(not(debug_assertions))]
+        {
+            device_create_info = vk::DeviceCreateInfo {
+                p_queue_create_infos: &device_queue_create_info,
+                queue_create_info_count: 1,
+                p_enabled_features: &device_features,
+                enabled_extension_count: 0,
+                enabled_layer_count: 0,
+                ..Default::default()
+            };
+        }
+
+        let device = unsafe { instance.create_device(physical_device, &device_create_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Logical device created.");
+
+        Ok(device)
     }
 
     #[cfg(debug_assertions)]
@@ -236,7 +252,9 @@ impl VkRsApp {
         Ok(true)
     }
 
-    pub fn new(required_extensions: Vec<&CStr>) -> Result<Self, Box<dyn Error>> {
+    pub fn new(
+        window_handle: &dyn raw_window_handle::HasRawWindowHandle,
+    ) -> Result<Self, Box<dyn Error>> {
         // Init Vulkan
         // Ash loads Vulkan dynamically, ash::Entry is the library loader and the entrypoint into the Vulkan API.
         // In the future, Ash should also support loading Vulkan as a static library.
@@ -253,6 +271,8 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         let enable_validation_layers =
             Self::check_validation_layers_support(&entry, &VALIDATION_LAYERS)?;
+
+        let required_extensions = ash_window::enumerate_required_extensions(window_handle)?;
 
         #[cfg(debug_assertions)]
         {
@@ -347,23 +367,55 @@ impl VkRsApp {
             instance = unsafe { entry.create_instance(&create_info, None) }?;
         }
 
-        let physical_device = Self::pick_physical_device(&instance)?;
-        let (device, graphics_queue) = Self::create_logical_device(
+        let surface =
+            unsafe { ash_window::create_surface(&entry, &instance, window_handle, None) }?;
+        let surface_loader = Surface::new(&entry, &instance);
+        #[cfg(debug_assertions)]
+        println!("Window surface created.");
+
+        let (physical_device, queue_family_indices) =
+            Self::pick_physical_device(&instance, surface, &surface_loader)?;
+        let device = Self::create_logical_device(
             #[cfg(debug_assertions)]
             enable_validation_layers,
             &instance,
             physical_device,
+            &queue_family_indices,
         )?;
+
+        let graphics_queue = unsafe {
+            device.get_device_queue(
+                queue_family_indices
+                    .graphics_family
+                    .expect("Missing graphics queue family index !"),
+                0,
+            )
+        };
+        #[cfg(debug_assertions)]
+        println!("Graphics queue handle retrieved.");
+
+        let present_queue = unsafe {
+            device.get_device_queue(
+                queue_family_indices
+                    .present_family
+                    .expect("Missing present queue family index !"),
+                0,
+            )
+        };
+        #[cfg(debug_assertions)]
+        println!("Present queue handle retrieved.");
 
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
             _entry: entry,
             instance,
-            _physical_device: physical_device,
-            device,
-            _graphics_queue: graphics_queue,
             #[cfg(debug_assertions)]
             debug_utils,
+            _physical_device: physical_device,
+            surface: (surface, surface_loader),
+            device,
+            _graphics_queue: graphics_queue,
+            _present_queue: present_queue,
         })
     }
 
@@ -373,12 +425,20 @@ impl VkRsApp {
 impl Drop for VkRsApp {
     fn drop(&mut self) {
         unsafe { self.device.destroy_device(None) };
+        #[cfg(debug_assertions)]
+        println!("Logical device dropped.");
+
+        let (surface, surface_loader) = &self.surface;
+        unsafe { surface_loader.destroy_surface(*surface, None) };
+        #[cfg(debug_assertions)]
+        println!("Window surface dropped.");
 
         #[cfg(debug_assertions)]
         if let Some((debug_utils_loader, debug_utils_messenger)) = &self.debug_utils {
             unsafe {
                 debug_utils_loader.destroy_debug_utils_messenger(*debug_utils_messenger, None)
             };
+            println!("Debug messenger dropped.");
         }
 
         // The ash::Entry used to create the instance has to be alive when calling ash::Instance::destroy_instance.
