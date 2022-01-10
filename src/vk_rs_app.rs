@@ -1,6 +1,7 @@
 use std::error::Error;
 #[cfg(debug_assertions)]
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::c_void;
+use std::ffi::{CStr, CString};
 
 #[cfg(debug_assertions)]
 use ash::extensions::ext::DebugUtils;
@@ -21,6 +22,12 @@ impl QueueFamilyIndices {
     pub fn is_complete(&self) -> bool {
         self.graphics_family.is_some() && self.present_family.is_some()
     }
+}
+
+struct SwapChainSupportDetails {
+    _capabilities: vk::SurfaceCapabilitiesKHR,
+    formats: Vec<vk::SurfaceFormatKHR>,
+    present_modes: Vec<vk::PresentModeKHR>,
 }
 
 pub struct VkRsApp {
@@ -65,6 +72,32 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
+    fn query_swap_chain_support(
+        physical_device: vk::PhysicalDevice,
+        surface: vk::SurfaceKHR,
+        surface_loader: &Surface,
+    ) -> Result<SwapChainSupportDetails, Box<dyn Error>> {
+        let capabilities = unsafe {
+            surface_loader.get_physical_device_surface_capabilities(physical_device, surface)
+        }
+        .expect("Error querying swap chain capabilities !");
+
+        let formats =
+            unsafe { surface_loader.get_physical_device_surface_formats(physical_device, surface) }
+                .expect("Error querying swap chain formats !");
+
+        let present_modes = unsafe {
+            surface_loader.get_physical_device_surface_present_modes(physical_device, surface)
+        }
+        .expect("Error querying swap chain present modes !");
+
+        Ok(SwapChainSupportDetails {
+            _capabilities: capabilities,
+            formats,
+            present_modes,
+        })
+    }
+
     fn find_queue_families(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
@@ -130,18 +163,25 @@ impl VkRsApp {
                     &DEVICE_EXTENSIONS,
                 )?
             {
-                #[cfg(debug_assertions)]
+                let swap_chain_support_details =
+                    Self::query_swap_chain_support(physical_device, surface, surface_loader)?;
+
+                if !swap_chain_support_details.formats.is_empty()
+                    && !swap_chain_support_details.present_modes.is_empty()
                 {
-                    let device_name = unsafe {
-                        CStr::from_ptr(device_properties.device_name.as_ptr())
-                            .to_str()
-                            .to_owned()
-                    }?;
+                    #[cfg(debug_assertions)]
+                    {
+                        let device_name = unsafe {
+                            CStr::from_ptr(device_properties.device_name.as_ptr())
+                                .to_str()
+                                .to_owned()
+                        }?;
 
-                    println!("Found suitable device : {} !", device_name);
+                        println!("Found suitable device : {} !", device_name);
+                    }
+
+                    return Ok((physical_device, device_queue_family_indices));
                 }
-
-                return Ok((physical_device, device_queue_family_indices));
             }
         }
 
