@@ -9,6 +9,8 @@ use ash::{extensions::khr::Surface, vk, Device, Entry, Instance};
 #[cfg(debug_assertions)]
 const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
 
+const DEVICE_EXTENSIONS: [&str; 1] = ["VK_KHR_swapchain"];
+
 #[derive(Default)]
 struct QueueFamilyIndices {
     graphics_family: Option<u32>,
@@ -122,6 +124,11 @@ impl VkRsApp {
             if device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU
                 && device_features.geometry_shader == vk::TRUE
                 && device_queue_family_indices.is_complete()
+                && Self::check_device_extensions_support(
+                    instance,
+                    physical_device,
+                    &DEVICE_EXTENSIONS,
+                )?
             {
                 #[cfg(debug_assertions)]
                 {
@@ -161,6 +168,14 @@ impl VkRsApp {
         };
 
         let device_create_info;
+        let enabled_extension_names = DEVICE_EXTENSIONS
+            .iter()
+            .map(|e| CString::new(*e).unwrap())
+            .collect::<Vec<CString>>();
+        let p_enabled_extension_names = enabled_extension_names
+            .iter()
+            .map(|e| e.as_ptr())
+            .collect::<Vec<*const i8>>();
 
         #[cfg(debug_assertions)]
         {
@@ -178,7 +193,8 @@ impl VkRsApp {
                     p_queue_create_infos: &device_queue_create_info,
                     queue_create_info_count: 1,
                     p_enabled_features: &device_features,
-                    enabled_extension_count: 0,
+                    enabled_extension_count: p_enabled_extension_names.len() as u32,
+                    pp_enabled_extension_names: p_enabled_extension_names.as_ptr(),
                     enabled_layer_count: p_enabled_layer_names.len() as u32,
                     pp_enabled_layer_names: p_enabled_layer_names.as_ptr(),
                     ..Default::default()
@@ -188,7 +204,8 @@ impl VkRsApp {
                     p_queue_create_infos: &device_queue_create_info,
                     queue_create_info_count: 1,
                     p_enabled_features: &device_features,
-                    enabled_extension_count: 0,
+                    enabled_extension_count: p_enabled_extension_names.len() as u32,
+                    pp_enabled_extension_names: p_enabled_extension_names.as_ptr(),
                     enabled_layer_count: 0,
                     ..Default::default()
                 };
@@ -201,7 +218,8 @@ impl VkRsApp {
                 p_queue_create_infos: &device_queue_create_info,
                 queue_create_info_count: 1,
                 p_enabled_features: &device_features,
-                enabled_extension_count: 0,
+                enabled_extension_count: p_enabled_extension_names.len() as u32,
+                pp_enabled_extension_names: p_enabled_extension_names.as_ptr(),
                 enabled_layer_count: 0,
                 ..Default::default()
             };
@@ -245,6 +263,45 @@ impl VkRsApp {
                 }
             }
             if !layer_is_available {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    fn check_device_extensions_support(
+        instance: &Instance,
+        physical_device: vk::PhysicalDevice,
+        extension_names: &[&str],
+    ) -> Result<bool, Box<dyn Error>> {
+        let available_extensions_properties =
+            unsafe { instance.enumerate_device_extension_properties(physical_device) }?;
+
+        println!("Available Vulkan extensions :");
+        for extension in available_extensions_properties.iter() {
+            let extension_name = unsafe {
+                CStr::from_ptr(extension.extension_name.as_ptr())
+                    .to_str()
+                    .to_owned()
+            }?;
+            println!("{}", extension_name);
+        }
+
+        for extension_name in extension_names.iter() {
+            let mut extension_is_available = false;
+            for available_extension in available_extensions_properties.iter() {
+                let available_extension_name = unsafe {
+                    CStr::from_ptr(available_extension.extension_name.as_ptr())
+                        .to_str()
+                        .to_owned()
+                }?;
+                if *extension_name == available_extension_name {
+                    extension_is_available = true;
+                    break;
+                }
+            }
+            if !extension_is_available {
                 return Ok(false);
             }
         }
