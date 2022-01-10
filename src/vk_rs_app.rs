@@ -5,7 +5,10 @@ use std::ffi::{CStr, CString};
 
 #[cfg(debug_assertions)]
 use ash::extensions::ext::DebugUtils;
-use ash::{extensions::khr::Surface, vk, Device, Entry, Instance};
+use ash::{
+    extensions::khr::{Surface, Swapchain},
+    vk, Device, Entry, Instance,
+};
 
 #[cfg(debug_assertions)]
 const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
@@ -25,7 +28,7 @@ impl QueueFamilyIndices {
 }
 
 struct SwapChainSupportDetails {
-    _capabilities: vk::SurfaceCapabilitiesKHR,
+    capabilities: vk::SurfaceCapabilitiesKHR,
     formats: Vec<vk::SurfaceFormatKHR>,
     present_modes: Vec<vk::PresentModeKHR>,
 }
@@ -40,6 +43,13 @@ pub struct VkRsApp {
     device: Device,
     _graphics_queue: vk::Queue,
     _present_queue: vk::Queue,
+    swap_chain: (
+        vk::SwapchainKHR,
+        Swapchain,
+        Vec<vk::Image>,
+        vk::Format,
+        vk::Extent2D,
+    ),
 }
 
 #[cfg(debug_assertions)]
@@ -92,10 +102,150 @@ impl VkRsApp {
         .expect("Error querying swap chain present modes !");
 
         Ok(SwapChainSupportDetails {
-            _capabilities: capabilities,
+            capabilities,
             formats,
             present_modes,
         })
+    }
+
+    fn choose_swap_surface_format(
+        available_formats: &[vk::SurfaceFormatKHR],
+    ) -> vk::SurfaceFormatKHR {
+        for available_format in available_formats.iter() {
+            if available_format.format == vk::Format::B8G8R8A8_SRGB
+                && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+            {
+                return *available_format;
+            }
+        }
+        return available_formats[0];
+    }
+
+    fn choose_swap_present_mode(
+        available_present_modes: &[vk::PresentModeKHR],
+    ) -> vk::PresentModeKHR {
+        for available_present_mode in available_present_modes.iter() {
+            if *available_present_mode == vk::PresentModeKHR::MAILBOX {
+                return *available_present_mode;
+            }
+        }
+        return vk::PresentModeKHR::FIFO;
+    }
+
+    fn choose_swap_extent(
+        capabilities: &vk::SurfaceCapabilitiesKHR,
+        width: u32,
+        height: u32,
+    ) -> vk::Extent2D {
+        if capabilities.current_extent.width != u32::MAX {
+            return capabilities.current_extent;
+        } else {
+            vk::Extent2D {
+                width: num::clamp(
+                    width,
+                    capabilities.min_image_extent.width,
+                    capabilities.max_image_extent.width,
+                ),
+                height: num::clamp(
+                    height,
+                    capabilities.min_image_extent.height,
+                    capabilities.max_image_extent.height,
+                ),
+            }
+        }
+    }
+
+    fn create_swap_chain(
+        instance: &Instance,
+        device: &Device,
+        surface: &vk::SurfaceKHR,
+        swap_chain_support_details: &SwapChainSupportDetails,
+        device_queue_family_indices: &QueueFamilyIndices,
+        width: u32,
+        height: u32,
+    ) -> Result<
+        (
+            vk::SwapchainKHR,
+            Swapchain,
+            Vec<vk::Image>,
+            vk::Format,
+            vk::Extent2D,
+        ),
+        Box<dyn Error>,
+    > {
+        let surface_format = Self::choose_swap_surface_format(&swap_chain_support_details.formats);
+        let present_mode =
+            Self::choose_swap_present_mode(&swap_chain_support_details.present_modes);
+        let extent =
+            Self::choose_swap_extent(&swap_chain_support_details.capabilities, width, height);
+        // Require at least one more image than the minimum to avoid waiting for the driver to complete its job.
+        let mut image_count = swap_chain_support_details.capabilities.min_image_count + 1;
+        if swap_chain_support_details.capabilities.max_image_count > 0
+            && image_count > swap_chain_support_details.capabilities.max_image_count
+        {
+            image_count = swap_chain_support_details.capabilities.max_image_count;
+        }
+
+        let swap_chain_create_info = vk::SwapchainCreateInfoKHR {
+            surface: *surface,
+            min_image_count: image_count,
+            image_format: surface_format.format,
+            image_color_space: surface_format.color_space,
+            image_extent: extent,
+            image_array_layers: 1,
+            image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            image_sharing_mode: if device_queue_family_indices.graphics_family
+                != device_queue_family_indices.present_family
+            {
+                vk::SharingMode::CONCURRENT
+            } else {
+                vk::SharingMode::EXCLUSIVE
+            },
+            queue_family_index_count: if device_queue_family_indices.graphics_family
+                != device_queue_family_indices.present_family
+            {
+                2
+            } else {
+                0
+            },
+            p_queue_family_indices: if device_queue_family_indices.graphics_family
+                != device_queue_family_indices.present_family
+            {
+                vec![
+                    device_queue_family_indices
+                        .graphics_family
+                        .expect("Missing graphics queue family index !"),
+                    device_queue_family_indices
+                        .present_family
+                        .expect("Missing present queue family index !"),
+                ]
+                .as_ptr()
+            } else {
+                vec![].as_ptr()
+            },
+            pre_transform: swap_chain_support_details.capabilities.current_transform,
+            composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
+            present_mode,
+            clipped: vk::TRUE,
+            old_swapchain: vk::SwapchainKHR::null(),
+            ..Default::default()
+        };
+
+        let swap_chain_loader = Swapchain::new(instance, device);
+        let swap_chain =
+            unsafe { swap_chain_loader.create_swapchain(&swap_chain_create_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Swap chain created.");
+
+        let swap_chain_images = unsafe { swap_chain_loader.get_swapchain_images(swap_chain) }?;
+
+        Ok((
+            swap_chain,
+            swap_chain_loader,
+            swap_chain_images,
+            surface_format.format,
+            extent,
+        ))
     }
 
     fn find_queue_families(
@@ -144,7 +294,14 @@ impl VkRsApp {
         instance: &Instance,
         surface: vk::SurfaceKHR,
         surface_loader: &Surface,
-    ) -> Result<(vk::PhysicalDevice, QueueFamilyIndices), Box<dyn Error>> {
+    ) -> Result<
+        (
+            vk::PhysicalDevice,
+            QueueFamilyIndices,
+            SwapChainSupportDetails,
+        ),
+        Box<dyn Error>,
+    > {
         let physical_devices = unsafe { instance.enumerate_physical_devices() }?;
 
         for &physical_device in physical_devices.iter() {
@@ -180,7 +337,11 @@ impl VkRsApp {
                         println!("Found suitable device : {} !", device_name);
                     }
 
-                    return Ok((physical_device, device_queue_family_indices));
+                    return Ok((
+                        physical_device,
+                        device_queue_family_indices,
+                        swap_chain_support_details,
+                    ));
                 }
             }
         }
@@ -351,6 +512,8 @@ impl VkRsApp {
 
     pub fn new(
         window_handle: &dyn raw_window_handle::HasRawWindowHandle,
+        width: u32,
+        height: u32,
     ) -> Result<Self, Box<dyn Error>> {
         // Init Vulkan
         // Ash loads Vulkan dynamically, ash::Entry is the library loader and the entrypoint into the Vulkan API.
@@ -470,7 +633,7 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Window surface created.");
 
-        let (physical_device, queue_family_indices) =
+        let (physical_device, queue_family_indices, swap_chain_support_details) =
             Self::pick_physical_device(&instance, surface, &surface_loader)?;
         let device = Self::create_logical_device(
             #[cfg(debug_assertions)]
@@ -502,6 +665,22 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Present queue handle retrieved.");
 
+        let (
+            swap_chain,
+            swap_chain_loader,
+            swap_chain_images,
+            swap_chain_image_format,
+            swap_chain_extent,
+        ) = Self::create_swap_chain(
+            &instance,
+            &device,
+            &surface,
+            &swap_chain_support_details,
+            &queue_family_indices,
+            width,
+            height,
+        )?;
+
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
             _entry: entry,
@@ -513,6 +692,13 @@ impl VkRsApp {
             device,
             _graphics_queue: graphics_queue,
             _present_queue: present_queue,
+            swap_chain: (
+                swap_chain,
+                swap_chain_loader,
+                swap_chain_images,
+                swap_chain_image_format,
+                swap_chain_extent,
+            ),
         })
     }
 
@@ -521,6 +707,11 @@ impl VkRsApp {
 
 impl Drop for VkRsApp {
     fn drop(&mut self) {
+        let (swap_chain, swap_chain_loader, _, _, _) = &self.swap_chain;
+        unsafe { swap_chain_loader.destroy_swapchain(*swap_chain, None) };
+        #[cfg(debug_assertions)]
+        println!("Swap chain dropped.");
+
         unsafe { self.device.destroy_device(None) };
         #[cfg(debug_assertions)]
         println!("Logical device dropped.");

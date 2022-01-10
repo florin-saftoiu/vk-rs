@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .build(&event_loop)?;
 
     // Init App (including Vulkan)
-    let mut vk_rs_app = VkRsApp::new(&window)?;
+    let mut vk_rs_app = VkRsApp::new(&window, 800, 600)?;
 
     // Main Loop
     event_loop.run(move |event, _, control_flow| {
