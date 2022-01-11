@@ -50,6 +50,7 @@ pub struct VkRsApp {
         vk::Format,
         vk::Extent2D,
     ),
+    swap_chain_image_views: Vec<vk::ImageView>,
 }
 
 #[cfg(debug_assertions)]
@@ -246,6 +247,44 @@ impl VkRsApp {
             surface_format.format,
             extent,
         ))
+    }
+
+    fn create_image_views(
+        device: &Device,
+        swap_chain_images: &[vk::Image],
+        swap_chain_image_format: vk::Format,
+    ) -> Result<Vec<vk::ImageView>, Box<dyn Error>> {
+        let swap_chain_image_views = swap_chain_images
+            .iter()
+            .map(|image| {
+                let image_view_create_info = vk::ImageViewCreateInfo {
+                    image: *image,
+                    view_type: vk::ImageViewType::TYPE_2D,
+                    format: swap_chain_image_format,
+                    components: vk::ComponentMapping {
+                        r: vk::ComponentSwizzle::IDENTITY,
+                        g: vk::ComponentSwizzle::IDENTITY,
+                        b: vk::ComponentSwizzle::IDENTITY,
+                        a: vk::ComponentSwizzle::IDENTITY,
+                    },
+                    subresource_range: vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                    ..Default::default()
+                };
+                let image_view = unsafe { device.create_image_view(&image_view_create_info, None) }
+                    .expect("Error creating swap chain image view !");
+                image_view
+            })
+            .collect();
+        #[cfg(debug_assertions)]
+        println!("Swap chain image views created.");
+
+        Ok(swap_chain_image_views)
     }
 
     fn find_queue_families(
@@ -681,6 +720,9 @@ impl VkRsApp {
             height,
         )?;
 
+        let swap_chain_image_views =
+            Self::create_image_views(&device, &swap_chain_images, swap_chain_image_format)?;
+
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
             _entry: entry,
@@ -699,6 +741,7 @@ impl VkRsApp {
                 swap_chain_image_format,
                 swap_chain_extent,
             ),
+            swap_chain_image_views,
         })
     }
 
@@ -707,6 +750,12 @@ impl VkRsApp {
 
 impl Drop for VkRsApp {
     fn drop(&mut self) {
+        for image_view in self.swap_chain_image_views.iter() {
+            unsafe { self.device.destroy_image_view(*image_view, None) }
+        }
+        #[cfg(debug_assertions)]
+        println!("Swap chain image views dropped.");
+
         let (swap_chain, swap_chain_loader, _, _, _) = &self.swap_chain;
         unsafe { swap_chain_loader.destroy_swapchain(*swap_chain, None) };
         #[cfg(debug_assertions)]
