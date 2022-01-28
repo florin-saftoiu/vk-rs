@@ -88,14 +88,40 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
-    fn create_graphics_pipeline() -> Result<(), Box<dyn Error>> {
-        let _vert_shader = read_shader(Path::new("shaders/vert.spv"))?;
+    fn create_shader_module(
+        device: &Device,
+        shader: &[u8],
+    ) -> Result<vk::ShaderModule, Box<dyn Error>> {
+        let shader_module_create_info = vk::ShaderModuleCreateInfo {
+            code_size: shader.len(),
+            p_code: shader.as_ptr() as *const u32,
+            ..Default::default()
+        };
+
+        let shader_module =
+            unsafe { device.create_shader_module(&shader_module_create_info, None) }?;
+
+        Ok(shader_module)
+    }
+
+    fn create_graphics_pipeline(device: &Device) -> Result<(), Box<dyn Error>> {
+        let vert_shader = read_shader(Path::new("shaders/vert.spv"))?;
+        let vert_shader_module = Self::create_shader_module(device, &vert_shader)?;
         #[cfg(debug_assertions)]
         println!("Vertex shader loaded.");
 
-        let _frag_shader = read_shader(Path::new("shaders/frag.spv"))?;
+        let frag_shader = read_shader(Path::new("shaders/frag.spv"))?;
+        let frag_shader_module = Self::create_shader_module(device, &frag_shader)?;
         #[cfg(debug_assertions)]
         println!("Fragment shader loaded.");
+
+        unsafe { device.destroy_shader_module(frag_shader_module, None) };
+        #[cfg(debug_assertions)]
+        println!("Fragment shader dropped.");
+
+        unsafe { device.destroy_shader_module(vert_shader_module, None) };
+        #[cfg(debug_assertions)]
+        println!("Vertex shader dropped.");
 
         Ok(())
     }
@@ -740,7 +766,7 @@ impl VkRsApp {
         let swap_chain_image_views =
             Self::create_image_views(&device, &swap_chain_images, swap_chain_image_format)?;
 
-        Self::create_graphics_pipeline()?;
+        Self::create_graphics_pipeline(&device)?;
 
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
