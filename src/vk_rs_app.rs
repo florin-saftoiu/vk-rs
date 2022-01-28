@@ -1,7 +1,7 @@
-use std::error::Error;
 #[cfg(debug_assertions)]
 use std::ffi::c_void;
 use std::ffi::{CStr, CString};
+use std::{error::Error, fs::File, io::Read, path::Path};
 
 #[cfg(debug_assertions)]
 use ash::extensions::ext::DebugUtils;
@@ -14,6 +14,11 @@ use ash::{
 const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
 
 const DEVICE_EXTENSIONS: [&str; 1] = ["VK_KHR_swapchain"];
+
+fn read_shader(path: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
+    let spv = File::open(path)?;
+    Ok(spv.bytes().filter_map(|b| b.ok()).collect::<Vec<u8>>())
+}
 
 #[derive(Default)]
 struct QueueFamilyIndices {
@@ -83,6 +88,18 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
+    fn create_graphics_pipeline() -> Result<(), Box<dyn Error>> {
+        let _vert_shader = read_shader(Path::new("shaders/vert.spv"))?;
+        #[cfg(debug_assertions)]
+        println!("Vertex shader loaded.");
+
+        let _frag_shader = read_shader(Path::new("shaders/frag.spv"))?;
+        #[cfg(debug_assertions)]
+        println!("Fragment shader loaded.");
+
+        Ok(())
+    }
+
     fn query_swap_chain_support(
         physical_device: vk::PhysicalDevice,
         surface: vk::SurfaceKHR,
@@ -722,6 +739,8 @@ impl VkRsApp {
 
         let swap_chain_image_views =
             Self::create_image_views(&device, &swap_chain_images, swap_chain_image_format)?;
+
+        Self::create_graphics_pipeline()?;
 
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
