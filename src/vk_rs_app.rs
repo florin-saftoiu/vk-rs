@@ -104,7 +104,10 @@ impl VkRsApp {
         Ok(shader_module)
     }
 
-    fn create_graphics_pipeline(device: &Device) -> Result<(), Box<dyn Error>> {
+    fn create_graphics_pipeline(
+        device: &Device,
+        swap_chain_extent: vk::Extent2D,
+    ) -> Result<(), Box<dyn Error>> {
         let vert_shader = read_shader(Path::new("shaders/vert.spv"))?;
         let vert_shader_module = Self::create_shader_module(device, &vert_shader)?;
         let vert_shader_entrypoint = CString::new("main").unwrap();
@@ -130,6 +133,36 @@ impl VkRsApp {
         println!("Fragment shader loaded.");
 
         let _shader_stages = [vert_shader_stage_info, frag_shader_stage_info];
+
+        let _vertex_input_info = vk::PipelineVertexInputStateCreateInfo {
+            ..Default::default()
+        };
+
+        let _input_assembly = vk::PipelineInputAssemblyStateCreateInfo {
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+            primitive_restart_enable: vk::FALSE,
+            ..Default::default()
+        };
+
+        let viewport = vk::Viewport {
+            width: swap_chain_extent.width as f32,
+            height: swap_chain_extent.height as f32,
+            max_depth: 1f32,
+            ..Default::default()
+        };
+
+        let scissor = vk::Rect2D {
+            extent: swap_chain_extent,
+            ..Default::default()
+        };
+
+        let _viewport_state = vk::PipelineViewportStateCreateInfo {
+            viewport_count: 1,
+            p_viewports: &viewport,
+            scissor_count: 1,
+            p_scissors: &scissor,
+            ..Default::default()
+        };
 
         unsafe { device.destroy_shader_module(frag_shader_module, None) };
         #[cfg(debug_assertions)]
@@ -782,7 +815,7 @@ impl VkRsApp {
         let swap_chain_image_views =
             Self::create_image_views(&device, &swap_chain_images, swap_chain_image_format)?;
 
-        Self::create_graphics_pipeline(&device)?;
+        Self::create_graphics_pipeline(&device, swap_chain_extent)?;
 
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
