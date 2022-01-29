@@ -107,13 +107,29 @@ impl VkRsApp {
     fn create_graphics_pipeline(device: &Device) -> Result<(), Box<dyn Error>> {
         let vert_shader = read_shader(Path::new("shaders/vert.spv"))?;
         let vert_shader_module = Self::create_shader_module(device, &vert_shader)?;
+        let vert_shader_entrypoint = CString::new("main").unwrap();
+        let vert_shader_stage_info = vk::PipelineShaderStageCreateInfo {
+            stage: vk::ShaderStageFlags::VERTEX,
+            module: vert_shader_module,
+            p_name: vert_shader_entrypoint.as_ptr(),
+            ..Default::default()
+        };
         #[cfg(debug_assertions)]
         println!("Vertex shader loaded.");
 
         let frag_shader = read_shader(Path::new("shaders/frag.spv"))?;
         let frag_shader_module = Self::create_shader_module(device, &frag_shader)?;
+        let frag_shader_entrypoint = CString::new("main").unwrap();
+        let frag_shader_stage_info = vk::PipelineShaderStageCreateInfo {
+            stage: vk::ShaderStageFlags::VERTEX,
+            module: frag_shader_module,
+            p_name: frag_shader_entrypoint.as_ptr(),
+            ..Default::default()
+        };
         #[cfg(debug_assertions)]
         println!("Fragment shader loaded.");
+
+        let _shader_stages = [vert_shader_stage_info, frag_shader_stage_info];
 
         unsafe { device.destroy_shader_module(frag_shader_module, None) };
         #[cfg(debug_assertions)]
