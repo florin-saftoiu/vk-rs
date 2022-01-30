@@ -61,6 +61,8 @@ pub struct VkRsApp {
     swap_chain_framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
     _command_buffers: Vec<vk::CommandBuffer>,
+    image_available_semaphore: vk::Semaphore,
+    render_finished_semaphore: vk::Semaphore,
 }
 
 #[cfg(debug_assertions)]
@@ -93,6 +95,18 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
+    fn create_semaphores(
+        device: &Device,
+    ) -> Result<(vk::Semaphore, vk::Semaphore), Box<dyn Error>> {
+        let semaphore_info = vk::SemaphoreCreateInfo::default();
+        let image_available_semaphore = unsafe { device.create_semaphore(&semaphore_info, None) }?;
+        let render_finished_semaphore = unsafe { device.create_semaphore(&semaphore_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Semaphores created.");
+
+        Ok((image_available_semaphore, render_finished_semaphore))
+    }
+
     fn create_command_buffers(
         device: &Device,
         swap_chain_buffers: &[vk::Framebuffer],
@@ -1079,6 +1093,9 @@ impl VkRsApp {
             graphics_pipeline,
         )?;
 
+        let (image_available_semaphore, render_finished_semaphore) =
+            Self::create_semaphores(&device)?;
+
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
             _entry: entry,
@@ -1103,6 +1120,8 @@ impl VkRsApp {
             swap_chain_framebuffers,
             command_pool,
             _command_buffers: command_buffers,
+            image_available_semaphore,
+            render_finished_semaphore,
         })
     }
 
@@ -1111,6 +1130,17 @@ impl VkRsApp {
 
 impl Drop for VkRsApp {
     fn drop(&mut self) {
+        unsafe {
+            self.device
+                .destroy_semaphore(self.render_finished_semaphore, None)
+        };
+        unsafe {
+            self.device
+                .destroy_semaphore(self.image_available_semaphore, None)
+        };
+        #[cfg(debug_assertions)]
+        println!("Semaphores dropped.");
+
         unsafe { self.device.destroy_command_pool(self.command_pool, None) };
         #[cfg(debug_assertions)]
         println!("Command pool dropped.");
