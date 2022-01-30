@@ -97,6 +97,9 @@ impl VkRsApp {
         device: &Device,
         swap_chain_buffers: &[vk::Framebuffer],
         command_pool: vk::CommandPool,
+        render_pass: vk::RenderPass,
+        swap_chain_extent: vk::Extent2D,
+        graphics_pipeline: vk::Pipeline,
     ) -> Result<Vec<vk::CommandBuffer>, Box<dyn Error>> {
         let alloc_info = vk::CommandBufferAllocateInfo {
             command_pool: command_pool,
@@ -106,6 +109,63 @@ impl VkRsApp {
         let command_buffers = unsafe { device.allocate_command_buffers(&alloc_info) }?;
         #[cfg(debug_assertions)]
         println!("Command buffers allocated.");
+
+        for (i, command_buffer) in command_buffers.iter().enumerate() {
+            let begin_info = vk::CommandBufferBeginInfo {
+                ..Default::default()
+            };
+            unsafe { device.begin_command_buffer(*command_buffer, &begin_info) }?;
+            #[cfg(debug_assertions)]
+            println!("Begin command buffer.");
+
+            let clear_color = vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0f32, 0f32, 0f32, 1f32],
+                },
+            };
+            let render_pass_info = vk::RenderPassBeginInfo {
+                render_pass: render_pass,
+                framebuffer: swap_chain_buffers[i],
+                render_area: vk::Rect2D {
+                    extent: swap_chain_extent,
+                    ..Default::default()
+                },
+                clear_value_count: 1,
+                p_clear_values: &clear_color,
+                ..Default::default()
+            };
+            unsafe {
+                device.cmd_begin_render_pass(
+                    *command_buffer,
+                    &render_pass_info,
+                    vk::SubpassContents::INLINE,
+                )
+            };
+            #[cfg(debug_assertions)]
+            println!("Begin render pass command added.");
+
+            unsafe {
+                device.cmd_bind_pipeline(
+                    *command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    graphics_pipeline,
+                )
+            };
+            #[cfg(debug_assertions)]
+            println!("Bind graphics pipeline command added.");
+
+            unsafe { device.cmd_draw(*command_buffer, 3, 1, 0, 0) };
+            #[cfg(debug_assertions)]
+            println!("Draw command added.");
+
+            unsafe { device.cmd_end_render_pass(*command_buffer) };
+            #[cfg(debug_assertions)]
+            println!("End render pass command added.");
+
+            unsafe { device.end_command_buffer(*command_buffer) }?;
+            #[cfg(debug_assertions)]
+            println!("End command buffer.");
+        }
 
         Ok(command_buffers)
     }
@@ -1010,8 +1070,14 @@ impl VkRsApp {
 
         let command_pool = Self::create_command_pool(&device, &queue_family_indices)?;
 
-        let command_buffers =
-            Self::create_command_buffers(&device, &swap_chain_framebuffers, command_pool)?;
+        let command_buffers = Self::create_command_buffers(
+            &device,
+            &swap_chain_framebuffers,
+            command_pool,
+            render_pass,
+            swap_chain_extent,
+            graphics_pipeline,
+        )?;
 
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
