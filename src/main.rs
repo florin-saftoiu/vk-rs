@@ -48,6 +48,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             Event::MainEventsCleared => {
                 vk_rs_app.draw_frame();
             }
+            Event::LoopDestroyed => {
+                vk_rs_app.loop_destroyed();
+            }
             _ => (),
         }
     });
