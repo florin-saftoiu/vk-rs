@@ -58,6 +58,7 @@ pub struct VkRsApp {
     swap_chain_image_views: Vec<vk::ImageView>,
     render_pass: vk::RenderPass,
     graphics_pipeline: (vk::PipelineLayout, vk::Pipeline),
+    swap_chain_framebuffers: Vec<vk::Framebuffer>,
 }
 
 #[cfg(debug_assertions)]
@@ -90,6 +91,36 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
+    fn create_framebuffers(
+        device: &Device,
+        swap_chain_image_views: &[vk::ImageView],
+        swap_chain_extent: vk::Extent2D,
+        render_pass: vk::RenderPass,
+    ) -> Result<Vec<vk::Framebuffer>, Box<dyn Error>> {
+        let swap_chain_framebuffers = swap_chain_image_views
+            .iter()
+            .map(|swap_chain_image_view| {
+                let attachments = [*swap_chain_image_view];
+                let framebuffer_info = vk::FramebufferCreateInfo {
+                    render_pass: render_pass,
+                    attachment_count: 1,
+                    p_attachments: attachments.as_ptr(),
+                    width: swap_chain_extent.width,
+                    height: swap_chain_extent.height,
+                    layers: 1,
+                    ..Default::default()
+                };
+                let framebuffer = unsafe { device.create_framebuffer(&framebuffer_info, None) }
+                    .expect("Error creating framebuffer !");
+                framebuffer
+            })
+            .collect();
+        #[cfg(debug_assertions)]
+        println!("Framebuffers created.");
+
+        Ok(swap_chain_framebuffers)
+    }
+
     fn create_render_pass(
         device: &Device,
         swap_chain_image_format: vk::Format,
@@ -275,6 +306,8 @@ impl VkRsApp {
             device.create_graphics_pipelines(vk::PipelineCache::null(), &pipeline_infos, None)
         }
         .expect("Error creating graphics pipeline !");
+        #[cfg(debug_assertions)]
+        println!("Graphics pipeline created.");
 
         unsafe { device.destroy_shader_module(frag_shader_module, None) };
         #[cfg(debug_assertions)]
@@ -932,6 +965,13 @@ impl VkRsApp {
         let (pipeline_layout, graphics_pipeline) =
             Self::create_graphics_pipeline(&device, swap_chain_extent, render_pass)?;
 
+        let swap_chain_framebuffers = Self::create_framebuffers(
+            &device,
+            &swap_chain_image_views,
+            swap_chain_extent,
+            render_pass,
+        )?;
+
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
             _entry: entry,
@@ -953,6 +993,7 @@ impl VkRsApp {
             swap_chain_image_views,
             render_pass,
             graphics_pipeline: (pipeline_layout, graphics_pipeline),
+            swap_chain_framebuffers,
         })
     }
 
@@ -961,6 +1002,12 @@ impl VkRsApp {
 
 impl Drop for VkRsApp {
     fn drop(&mut self) {
+        for framebuffer in self.swap_chain_framebuffers.iter() {
+            unsafe { self.device.destroy_framebuffer(*framebuffer, None) }
+        }
+        #[cfg(debug_assertions)]
+        println!("Framebuffers dropped.");
+
         let (pipeline_layout, graphics_pipeline) = &self.graphics_pipeline;
         unsafe { self.device.destroy_pipeline(*graphics_pipeline, None) };
         #[cfg(debug_assertions)]
