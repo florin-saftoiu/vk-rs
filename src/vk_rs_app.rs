@@ -57,7 +57,7 @@ pub struct VkRsApp {
     ),
     swap_chain_image_views: Vec<vk::ImageView>,
     render_pass: vk::RenderPass,
-    pipeline_layout: vk::PipelineLayout,
+    graphics_pipeline: (vk::PipelineLayout, vk::Pipeline),
 }
 
 #[cfg(debug_assertions)]
@@ -150,7 +150,8 @@ impl VkRsApp {
     fn create_graphics_pipeline(
         device: &Device,
         swap_chain_extent: vk::Extent2D,
-    ) -> Result<vk::PipelineLayout, Box<dyn Error>> {
+        render_pass: vk::RenderPass,
+    ) -> Result<(vk::PipelineLayout, vk::Pipeline), Box<dyn Error>> {
         let vert_shader = read_shader(Path::new("shaders/vert.spv"))?;
         let vert_shader_module = Self::create_shader_module(device, &vert_shader)?;
         let vert_shader_entrypoint = CString::new("main").unwrap();
@@ -167,7 +168,7 @@ impl VkRsApp {
         let frag_shader_module = Self::create_shader_module(device, &frag_shader)?;
         let frag_shader_entrypoint = CString::new("main").unwrap();
         let frag_shader_stage_info = vk::PipelineShaderStageCreateInfo {
-            stage: vk::ShaderStageFlags::VERTEX,
+            stage: vk::ShaderStageFlags::FRAGMENT,
             module: frag_shader_module,
             p_name: frag_shader_entrypoint.as_ptr(),
             ..Default::default()
@@ -175,13 +176,13 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Fragment shader loaded.");
 
-        let _shader_stages = [vert_shader_stage_info, frag_shader_stage_info];
+        let shader_stages = [vert_shader_stage_info, frag_shader_stage_info];
 
-        let _vertex_input_info = vk::PipelineVertexInputStateCreateInfo {
+        let vertex_input_info = vk::PipelineVertexInputStateCreateInfo {
             ..Default::default()
         };
 
-        let _input_assembly = vk::PipelineInputAssemblyStateCreateInfo {
+        let input_assembly = vk::PipelineInputAssemblyStateCreateInfo {
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,
             primitive_restart_enable: vk::FALSE,
             ..Default::default()
@@ -199,7 +200,7 @@ impl VkRsApp {
             ..Default::default()
         };
 
-        let _viewport_state = vk::PipelineViewportStateCreateInfo {
+        let viewport_state = vk::PipelineViewportStateCreateInfo {
             viewport_count: 1,
             p_viewports: &viewport,
             scissor_count: 1,
@@ -207,14 +208,14 @@ impl VkRsApp {
             ..Default::default()
         };
 
-        let _rasterizer = vk::PipelineRasterizationStateCreateInfo {
+        let rasterizer = vk::PipelineRasterizationStateCreateInfo {
             line_width: 1f32,
             cull_mode: vk::CullModeFlags::BACK,
             front_face: vk::FrontFace::CLOCKWISE,
             ..Default::default()
         };
 
-        let _multisampling = vk::PipelineMultisampleStateCreateInfo {
+        let multisampling = vk::PipelineMultisampleStateCreateInfo {
             rasterization_samples: vk::SampleCountFlags::TYPE_1,
             min_sample_shading: 1f32,
             ..Default::default()
@@ -230,7 +231,7 @@ impl VkRsApp {
             ..Default::default()
         };
 
-        let _color_blending = vk::PipelineColorBlendStateCreateInfo {
+        let color_blending = vk::PipelineColorBlendStateCreateInfo {
             logic_op: vk::LogicOp::COPY,
             attachment_count: 1,
             p_attachments: &color_blend_attachment,
@@ -254,6 +255,27 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Pipeline layout created.");
 
+        let pipeline_infos = [vk::GraphicsPipelineCreateInfo {
+            stage_count: 2,
+            p_stages: shader_stages.as_ptr(),
+            p_vertex_input_state: &vertex_input_info,
+            p_input_assembly_state: &input_assembly,
+            p_viewport_state: &viewport_state,
+            p_rasterization_state: &rasterizer,
+            p_multisample_state: &multisampling,
+            p_color_blend_state: &color_blending,
+            layout: pipeline_layout,
+            render_pass,
+            base_pipeline_handle: vk::Pipeline::null(),
+            base_pipeline_index: -1,
+            ..Default::default()
+        }];
+
+        let graphics_pipelines = unsafe {
+            device.create_graphics_pipelines(vk::PipelineCache::null(), &pipeline_infos, None)
+        }
+        .expect("Error creating graphics pipeline !");
+
         unsafe { device.destroy_shader_module(frag_shader_module, None) };
         #[cfg(debug_assertions)]
         println!("Fragment shader dropped.");
@@ -262,7 +284,7 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Vertex shader dropped.");
 
-        Ok(pipeline_layout)
+        Ok((pipeline_layout, graphics_pipelines[0]))
     }
 
     fn query_swap_chain_support(
@@ -907,7 +929,8 @@ impl VkRsApp {
 
         let render_pass = Self::create_render_pass(&device, swap_chain_image_format)?;
 
-        let pipeline_layout = Self::create_graphics_pipeline(&device, swap_chain_extent)?;
+        let (pipeline_layout, graphics_pipeline) =
+            Self::create_graphics_pipeline(&device, swap_chain_extent, render_pass)?;
 
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
@@ -929,7 +952,7 @@ impl VkRsApp {
             ),
             swap_chain_image_views,
             render_pass,
-            pipeline_layout,
+            graphics_pipeline: (pipeline_layout, graphics_pipeline),
         })
     }
 
@@ -938,10 +961,11 @@ impl VkRsApp {
 
 impl Drop for VkRsApp {
     fn drop(&mut self) {
-        unsafe {
-            self.device
-                .destroy_pipeline_layout(self.pipeline_layout, None)
-        };
+        let (pipeline_layout, graphics_pipeline) = &self.graphics_pipeline;
+        unsafe { self.device.destroy_pipeline(*graphics_pipeline, None) };
+        #[cfg(debug_assertions)]
+        println!("Graphics pipeline dropped.");
+        unsafe { self.device.destroy_pipeline_layout(*pipeline_layout, None) };
         #[cfg(debug_assertions)]
         println!("Pipeline layout dropped.");
 
