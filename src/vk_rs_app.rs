@@ -60,6 +60,7 @@ pub struct VkRsApp {
     graphics_pipeline: (vk::PipelineLayout, vk::Pipeline),
     swap_chain_framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
+    _command_buffers: Vec<vk::CommandBuffer>,
 }
 
 #[cfg(debug_assertions)]
@@ -92,6 +93,23 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
+    fn create_command_buffers(
+        device: &Device,
+        swap_chain_buffers: &[vk::Framebuffer],
+        command_pool: vk::CommandPool,
+    ) -> Result<Vec<vk::CommandBuffer>, Box<dyn Error>> {
+        let alloc_info = vk::CommandBufferAllocateInfo {
+            command_pool: command_pool,
+            command_buffer_count: swap_chain_buffers.len() as u32,
+            ..Default::default()
+        };
+        let command_buffers = unsafe { device.allocate_command_buffers(&alloc_info) }?;
+        #[cfg(debug_assertions)]
+        println!("Command buffers allocated.");
+
+        Ok(command_buffers)
+    }
+
     fn create_command_pool(
         device: &Device,
         device_queue_family_indices: &QueueFamilyIndices,
@@ -992,6 +1010,9 @@ impl VkRsApp {
 
         let command_pool = Self::create_command_pool(&device, &queue_family_indices)?;
 
+        let command_buffers =
+            Self::create_command_buffers(&device, &swap_chain_framebuffers, command_pool)?;
+
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
             _entry: entry,
@@ -1015,6 +1036,7 @@ impl VkRsApp {
             graphics_pipeline: (pipeline_layout, graphics_pipeline),
             swap_chain_framebuffers,
             command_pool,
+            _command_buffers: command_buffers,
         })
     }
 
