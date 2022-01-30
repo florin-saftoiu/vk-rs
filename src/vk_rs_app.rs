@@ -56,6 +56,7 @@ pub struct VkRsApp {
         vk::Extent2D,
     ),
     swap_chain_image_views: Vec<vk::ImageView>,
+    render_pass: vk::RenderPass,
     pipeline_layout: vk::PipelineLayout,
 }
 
@@ -89,6 +90,47 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
+    fn create_render_pass(
+        device: &Device,
+        swap_chain_image_format: vk::Format,
+    ) -> Result<vk::RenderPass, Box<dyn Error>> {
+        let color_attachment = vk::AttachmentDescription {
+            format: swap_chain_image_format,
+            samples: vk::SampleCountFlags::TYPE_1,
+            load_op: vk::AttachmentLoadOp::CLEAR,
+            stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+            stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+            initial_layout: vk::ImageLayout::UNDEFINED,
+            final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+            ..Default::default()
+        };
+
+        let color_attachment_ref = vk::AttachmentReference {
+            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            ..Default::default()
+        };
+
+        let subpass = vk::SubpassDescription {
+            color_attachment_count: 1,
+            p_color_attachments: &color_attachment_ref,
+            ..Default::default()
+        };
+
+        let render_pass_info = vk::RenderPassCreateInfo {
+            attachment_count: 1,
+            p_attachments: &color_attachment,
+            subpass_count: 1,
+            p_subpasses: &subpass,
+            ..Default::default()
+        };
+
+        let render_pass = unsafe { device.create_render_pass(&render_pass_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Render pass created.");
+
+        Ok(render_pass)
+    }
+
     fn create_shader_module(
         device: &Device,
         shader: &[u8],
@@ -863,6 +905,8 @@ impl VkRsApp {
         let swap_chain_image_views =
             Self::create_image_views(&device, &swap_chain_images, swap_chain_image_format)?;
 
+        let render_pass = Self::create_render_pass(&device, swap_chain_image_format)?;
+
         let pipeline_layout = Self::create_graphics_pipeline(&device, swap_chain_extent)?;
 
         Ok(Self {
@@ -884,6 +928,7 @@ impl VkRsApp {
                 swap_chain_extent,
             ),
             swap_chain_image_views,
+            render_pass,
             pipeline_layout,
         })
     }
@@ -899,6 +944,10 @@ impl Drop for VkRsApp {
         };
         #[cfg(debug_assertions)]
         println!("Pipeline layout dropped.");
+
+        unsafe { self.device.destroy_render_pass(self.render_pass, None) };
+        #[cfg(debug_assertions)]
+        println!("Render pass dropped.");
 
         for image_view in self.swap_chain_image_views.iter() {
             unsafe { self.device.destroy_image_view(*image_view, None) }
