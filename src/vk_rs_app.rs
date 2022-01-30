@@ -56,6 +56,7 @@ pub struct VkRsApp {
         vk::Extent2D,
     ),
     swap_chain_image_views: Vec<vk::ImageView>,
+    pipeline_layout: vk::PipelineLayout,
 }
 
 #[cfg(debug_assertions)]
@@ -107,7 +108,7 @@ impl VkRsApp {
     fn create_graphics_pipeline(
         device: &Device,
         swap_chain_extent: vk::Extent2D,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<vk::PipelineLayout, Box<dyn Error>> {
         let vert_shader = read_shader(Path::new("shaders/vert.spv"))?;
         let vert_shader_module = Self::create_shader_module(device, &vert_shader)?;
         let vert_shader_entrypoint = CString::new("main").unwrap();
@@ -164,6 +165,53 @@ impl VkRsApp {
             ..Default::default()
         };
 
+        let _rasterizer = vk::PipelineRasterizationStateCreateInfo {
+            line_width: 1f32,
+            cull_mode: vk::CullModeFlags::BACK,
+            front_face: vk::FrontFace::CLOCKWISE,
+            ..Default::default()
+        };
+
+        let _multisampling = vk::PipelineMultisampleStateCreateInfo {
+            rasterization_samples: vk::SampleCountFlags::TYPE_1,
+            min_sample_shading: 1f32,
+            ..Default::default()
+        };
+
+        let color_blend_attachment = vk::PipelineColorBlendAttachmentState {
+            color_write_mask: vk::ColorComponentFlags::R
+                | vk::ColorComponentFlags::G
+                | vk::ColorComponentFlags::B
+                | vk::ColorComponentFlags::A,
+            src_color_blend_factor: vk::BlendFactor::ONE,
+            src_alpha_blend_factor: vk::BlendFactor::ONE,
+            ..Default::default()
+        };
+
+        let _color_blending = vk::PipelineColorBlendStateCreateInfo {
+            logic_op: vk::LogicOp::COPY,
+            attachment_count: 1,
+            p_attachments: &color_blend_attachment,
+            ..Default::default()
+        };
+
+        let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::LINE_WIDTH];
+
+        let _dynamic_state = vk::PipelineDynamicStateCreateInfo {
+            dynamic_state_count: 2,
+            p_dynamic_states: dynamic_states.as_ptr(),
+            ..Default::default()
+        };
+
+        let pipeline_layout_info = vk::PipelineLayoutCreateInfo {
+            ..Default::default()
+        };
+
+        let pipeline_layout =
+            unsafe { device.create_pipeline_layout(&pipeline_layout_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Pipeline layout created.");
+
         unsafe { device.destroy_shader_module(frag_shader_module, None) };
         #[cfg(debug_assertions)]
         println!("Fragment shader dropped.");
@@ -172,7 +220,7 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Vertex shader dropped.");
 
-        Ok(())
+        Ok(pipeline_layout)
     }
 
     fn query_swap_chain_support(
@@ -486,7 +534,7 @@ impl VkRsApp {
         physical_device: vk::PhysicalDevice,
         device_queue_family_indices: &QueueFamilyIndices,
     ) -> Result<Device, Box<dyn Error>> {
-        let queue_priority = 1.0f32;
+        let queue_priority = 1f32;
         let device_queue_create_info = vk::DeviceQueueCreateInfo {
             queue_family_index: device_queue_family_indices
                 .graphics_family
@@ -815,7 +863,7 @@ impl VkRsApp {
         let swap_chain_image_views =
             Self::create_image_views(&device, &swap_chain_images, swap_chain_image_format)?;
 
-        Self::create_graphics_pipeline(&device, swap_chain_extent)?;
+        let pipeline_layout = Self::create_graphics_pipeline(&device, swap_chain_extent)?;
 
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
@@ -836,6 +884,7 @@ impl VkRsApp {
                 swap_chain_extent,
             ),
             swap_chain_image_views,
+            pipeline_layout,
         })
     }
 
@@ -844,6 +893,13 @@ impl VkRsApp {
 
 impl Drop for VkRsApp {
     fn drop(&mut self) {
+        unsafe {
+            self.device
+                .destroy_pipeline_layout(self.pipeline_layout, None)
+        };
+        #[cfg(debug_assertions)]
+        println!("Pipeline layout dropped.");
+
         for image_view in self.swap_chain_image_views.iter() {
             unsafe { self.device.destroy_image_view(*image_view, None) }
         }
