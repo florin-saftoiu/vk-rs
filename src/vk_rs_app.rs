@@ -46,8 +46,8 @@ pub struct VkRsApp {
     _physical_device: vk::PhysicalDevice,
     surface: (vk::SurfaceKHR, Surface),
     device: Device,
-    _graphics_queue: vk::Queue,
-    _present_queue: vk::Queue,
+    graphics_queue: vk::Queue,
+    present_queue: vk::Queue,
     swap_chain: (
         vk::SwapchainKHR,
         Swapchain,
@@ -60,7 +60,7 @@ pub struct VkRsApp {
     graphics_pipeline: (vk::PipelineLayout, vk::Pipeline),
     swap_chain_framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
-    _command_buffers: Vec<vk::CommandBuffer>,
+    command_buffers: Vec<vk::CommandBuffer>,
     image_available_semaphore: vk::Semaphore,
     render_finished_semaphore: vk::Semaphore,
 }
@@ -257,11 +257,21 @@ impl VkRsApp {
             ..Default::default()
         };
 
+        let dependency = vk::SubpassDependency {
+            src_subpass: vk::SUBPASS_EXTERNAL,
+            src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            ..Default::default()
+        };
+
         let render_pass_info = vk::RenderPassCreateInfo {
             attachment_count: 1,
             p_attachments: &color_attachment,
             subpass_count: 1,
             p_subpasses: &subpass,
+            dependency_count: 1,
+            p_dependencies: &dependency,
             ..Default::default()
         };
 
@@ -1105,8 +1115,8 @@ impl VkRsApp {
             _physical_device: physical_device,
             surface: (surface, surface_loader),
             device,
-            _graphics_queue: graphics_queue,
-            _present_queue: present_queue,
+            graphics_queue,
+            present_queue,
             swap_chain: (
                 swap_chain,
                 swap_chain_loader,
@@ -1119,13 +1129,56 @@ impl VkRsApp {
             graphics_pipeline: (pipeline_layout, graphics_pipeline),
             swap_chain_framebuffers,
             command_pool,
-            _command_buffers: command_buffers,
+            command_buffers,
             image_available_semaphore,
             render_finished_semaphore,
         })
     }
 
-    pub fn draw_frame(&mut self) {}
+    pub fn draw_frame(&mut self) {
+        let (swap_chain, swap_chain_loader, _, _, _) = &self.swap_chain;
+
+        let (image_index, _) = unsafe {
+            swap_chain_loader.acquire_next_image(
+                *swap_chain,
+                u64::MAX,
+                self.image_available_semaphore,
+                vk::Fence::null(),
+            )
+        }
+        .expect("Error acquiring next image !");
+
+        let wait_semaphores = [self.image_available_semaphore];
+        let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+        let signal_semaphores = [self.render_finished_semaphore];
+        let submit_infos = [vk::SubmitInfo {
+            wait_semaphore_count: 1,
+            p_wait_semaphores: wait_semaphores.as_ptr(),
+            p_wait_dst_stage_mask: wait_stages.as_ptr(),
+            command_buffer_count: 1,
+            p_command_buffers: &self.command_buffers[image_index as usize],
+            signal_semaphore_count: 1,
+            p_signal_semaphores: signal_semaphores.as_ptr(),
+            ..Default::default()
+        }];
+        unsafe {
+            self.device
+                .queue_submit(self.graphics_queue, &submit_infos, vk::Fence::null())
+        }
+        .expect("Error submitting command buffer !");
+
+        let swap_chains = [*swap_chain];
+        let present_info = vk::PresentInfoKHR {
+            wait_semaphore_count: 1,
+            p_wait_semaphores: signal_semaphores.as_ptr(),
+            swapchain_count: 1,
+            p_swapchains: swap_chains.as_ptr(),
+            p_image_indices: &image_index,
+            ..Default::default()
+        };
+        unsafe { swap_chain_loader.queue_present(self.present_queue, &present_info) }
+            .expect("Error presenting to swap chain !");
+    }
 }
 
 impl Drop for VkRsApp {
