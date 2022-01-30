@@ -59,6 +59,7 @@ pub struct VkRsApp {
     render_pass: vk::RenderPass,
     graphics_pipeline: (vk::PipelineLayout, vk::Pipeline),
     swap_chain_framebuffers: Vec<vk::Framebuffer>,
+    command_pool: vk::CommandPool,
 }
 
 #[cfg(debug_assertions)]
@@ -91,6 +92,23 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
+    fn create_command_pool(
+        device: &Device,
+        device_queue_family_indices: &QueueFamilyIndices,
+    ) -> Result<vk::CommandPool, Box<dyn Error>> {
+        let pool_info = vk::CommandPoolCreateInfo {
+            queue_family_index: device_queue_family_indices
+                .graphics_family
+                .expect("Missing graphics queue family index !"),
+            ..Default::default()
+        };
+        let command_pool = unsafe { device.create_command_pool(&pool_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Command pool created.");
+
+        Ok(command_pool)
+    }
+
     fn create_framebuffers(
         device: &Device,
         swap_chain_image_views: &[vk::ImageView],
@@ -972,6 +990,8 @@ impl VkRsApp {
             render_pass,
         )?;
 
+        let command_pool = Self::create_command_pool(&device, &queue_family_indices)?;
+
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
             _entry: entry,
@@ -994,6 +1014,7 @@ impl VkRsApp {
             render_pass,
             graphics_pipeline: (pipeline_layout, graphics_pipeline),
             swap_chain_framebuffers,
+            command_pool,
         })
     }
 
@@ -1002,6 +1023,10 @@ impl VkRsApp {
 
 impl Drop for VkRsApp {
     fn drop(&mut self) {
+        unsafe { self.device.destroy_command_pool(self.command_pool, None) };
+        #[cfg(debug_assertions)]
+        println!("Command pool dropped.");
+
         for framebuffer in self.swap_chain_framebuffers.iter() {
             unsafe { self.device.destroy_framebuffer(*framebuffer, None) }
         }
