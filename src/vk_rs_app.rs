@@ -1178,6 +1178,9 @@ impl VkRsApp {
         };
         unsafe { swap_chain_loader.queue_present(self.present_queue, &present_info) }
             .expect("Error presenting to swap chain !");
+
+        unsafe { self.device.queue_wait_idle(self.present_queue) }
+            .expect("Error waiting for presentation to finish !");
     }
 
     pub fn loop_destroyed(&self) {
