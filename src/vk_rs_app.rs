@@ -63,6 +63,7 @@ pub struct VkRsApp {
     command_buffers: Vec<vk::CommandBuffer>,
     image_available_semaphore: vk::Semaphore,
     render_finished_semaphore: vk::Semaphore,
+    in_flight_fence: vk::Fence,
 }
 
 #[cfg(debug_assertions)]
@@ -95,16 +96,27 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
-    fn create_semaphores(
+    fn create_sync_objects(
         device: &Device,
-    ) -> Result<(vk::Semaphore, vk::Semaphore), Box<dyn Error>> {
+    ) -> Result<(vk::Semaphore, vk::Semaphore, vk::Fence), Box<dyn Error>> {
         let semaphore_info = vk::SemaphoreCreateInfo::default();
         let image_available_semaphore = unsafe { device.create_semaphore(&semaphore_info, None) }?;
         let render_finished_semaphore = unsafe { device.create_semaphore(&semaphore_info, None) }?;
-        #[cfg(debug_assertions)]
-        println!("Semaphores created.");
 
-        Ok((image_available_semaphore, render_finished_semaphore))
+        let fence_info = vk::FenceCreateInfo {
+            flags: vk::FenceCreateFlags::SIGNALED,
+            ..Default::default()
+        };
+        let in_flight_fence = unsafe { device.create_fence(&fence_info, None) }?;
+
+        #[cfg(debug_assertions)]
+        println!("Sync objects created.");
+
+        Ok((
+            image_available_semaphore,
+            render_finished_semaphore,
+            in_flight_fence,
+        ))
     }
 
     fn create_command_buffers(
@@ -1103,8 +1115,8 @@ impl VkRsApp {
             graphics_pipeline,
         )?;
 
-        let (image_available_semaphore, render_finished_semaphore) =
-            Self::create_semaphores(&device)?;
+        let (image_available_semaphore, render_finished_semaphore, in_flight_fence) =
+            Self::create_sync_objects(&device)?;
 
         Ok(Self {
             // The entry has to live as long as the app, otherwise you get an access violation when destroying instance.
@@ -1132,10 +1144,19 @@ impl VkRsApp {
             command_buffers,
             image_available_semaphore,
             render_finished_semaphore,
+            in_flight_fence,
         })
     }
 
     pub fn draw_frame(&mut self) {
+        unsafe {
+            self.device
+                .wait_for_fences(&[self.in_flight_fence], true, u64::MAX)
+        }
+        .expect("Error waiting for fence !");
+        unsafe { self.device.reset_fences(&[self.in_flight_fence]) }
+            .expect("Error resetting fence !");
+
         let (swap_chain, swap_chain_loader, _, _, _) = &self.swap_chain;
 
         let (image_index, _) = unsafe {
@@ -1163,7 +1184,7 @@ impl VkRsApp {
         }];
         unsafe {
             self.device
-                .queue_submit(self.graphics_queue, &submit_infos, vk::Fence::null())
+                .queue_submit(self.graphics_queue, &submit_infos, self.in_flight_fence)
         }
         .expect("Error submitting command buffer !");
 
@@ -1202,8 +1223,9 @@ impl Drop for VkRsApp {
             self.device
                 .destroy_semaphore(self.image_available_semaphore, None)
         };
+        unsafe { self.device.destroy_fence(self.in_flight_fence, None) }
         #[cfg(debug_assertions)]
-        println!("Semaphores dropped.");
+        println!("Sync objects dropped.");
 
         unsafe { self.device.destroy_command_pool(self.command_pool, None) };
         #[cfg(debug_assertions)]
