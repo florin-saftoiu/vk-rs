@@ -14,6 +14,7 @@ use ash::{
 const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
 
 const DEVICE_EXTENSIONS: [&str; 1] = ["VK_KHR_swapchain"];
+const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 fn read_shader(path: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
     let spv = File::open(path)?;
@@ -61,9 +62,10 @@ pub struct VkRsApp {
     swap_chain_framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
-    image_available_semaphore: vk::Semaphore,
-    render_finished_semaphore: vk::Semaphore,
-    in_flight_fence: vk::Fence,
+    image_available_semaphores: Vec<vk::Semaphore>,
+    render_finished_semaphores: Vec<vk::Semaphore>,
+    in_flight_fences: Vec<vk::Fence>,
+    current_frame: usize,
 }
 
 #[cfg(debug_assertions)]
@@ -98,24 +100,32 @@ unsafe extern "system" fn vk_debug_utils_callback(
 impl VkRsApp {
     fn create_sync_objects(
         device: &Device,
-    ) -> Result<(vk::Semaphore, vk::Semaphore, vk::Fence), Box<dyn Error>> {
+    ) -> Result<(Vec<vk::Semaphore>, Vec<vk::Semaphore>, Vec<vk::Fence>), Box<dyn Error>> {
         let semaphore_info = vk::SemaphoreCreateInfo::default();
-        let image_available_semaphore = unsafe { device.create_semaphore(&semaphore_info, None) }?;
-        let render_finished_semaphore = unsafe { device.create_semaphore(&semaphore_info, None) }?;
-
         let fence_info = vk::FenceCreateInfo {
             flags: vk::FenceCreateFlags::SIGNALED,
             ..Default::default()
         };
-        let in_flight_fence = unsafe { device.create_fence(&fence_info, None) }?;
+
+        let mut image_available_semaphores = vec![];
+        let mut render_finished_semaphores = vec![];
+        let mut in_flight_fences = vec![];
+
+        for _ in 0..MAX_FRAMES_IN_FLIGHT {
+            image_available_semaphores
+                .push(unsafe { device.create_semaphore(&semaphore_info, None) }?);
+            render_finished_semaphores
+                .push(unsafe { device.create_semaphore(&semaphore_info, None) }?);
+            in_flight_fences.push(unsafe { device.create_fence(&fence_info, None) }?);
+        }
 
         #[cfg(debug_assertions)]
         println!("Sync objects created.");
 
         Ok((
-            image_available_semaphore,
-            render_finished_semaphore,
-            in_flight_fence,
+            image_available_semaphores,
+            render_finished_semaphores,
+            in_flight_fences,
         ))
     }
 
@@ -1115,7 +1125,7 @@ impl VkRsApp {
             graphics_pipeline,
         )?;
 
-        let (image_available_semaphore, render_finished_semaphore, in_flight_fence) =
+        let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
             Self::create_sync_objects(&device)?;
 
         Ok(Self {
@@ -1142,20 +1152,27 @@ impl VkRsApp {
             swap_chain_framebuffers,
             command_pool,
             command_buffers,
-            image_available_semaphore,
-            render_finished_semaphore,
-            in_flight_fence,
+            image_available_semaphores,
+            render_finished_semaphores,
+            in_flight_fences,
+            current_frame: 0,
         })
     }
 
     pub fn draw_frame(&mut self) {
         unsafe {
-            self.device
-                .wait_for_fences(&[self.in_flight_fence], true, u64::MAX)
+            self.device.wait_for_fences(
+                &[self.in_flight_fences[self.current_frame]],
+                true,
+                u64::MAX,
+            )
         }
         .expect("Error waiting for fence !");
-        unsafe { self.device.reset_fences(&[self.in_flight_fence]) }
-            .expect("Error resetting fence !");
+        unsafe {
+            self.device
+                .reset_fences(&[self.in_flight_fences[self.current_frame]])
+        }
+        .expect("Error resetting fence !");
 
         let (swap_chain, swap_chain_loader, _, _, _) = &self.swap_chain;
 
@@ -1163,15 +1180,15 @@ impl VkRsApp {
             swap_chain_loader.acquire_next_image(
                 *swap_chain,
                 u64::MAX,
-                self.image_available_semaphore,
+                self.image_available_semaphores[self.current_frame],
                 vk::Fence::null(),
             )
         }
         .expect("Error acquiring next image !");
 
-        let wait_semaphores = [self.image_available_semaphore];
+        let wait_semaphores = [self.image_available_semaphores[self.current_frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let signal_semaphores = [self.render_finished_semaphore];
+        let signal_semaphores = [self.render_finished_semaphores[self.current_frame]];
         let submit_infos = [vk::SubmitInfo {
             wait_semaphore_count: 1,
             p_wait_semaphores: wait_semaphores.as_ptr(),
@@ -1183,8 +1200,11 @@ impl VkRsApp {
             ..Default::default()
         }];
         unsafe {
-            self.device
-                .queue_submit(self.graphics_queue, &submit_infos, self.in_flight_fence)
+            self.device.queue_submit(
+                self.graphics_queue,
+                &submit_infos,
+                self.in_flight_fences[self.current_frame],
+            )
         }
         .expect("Error submitting command buffer !");
 
@@ -1202,6 +1222,8 @@ impl VkRsApp {
 
         unsafe { self.device.queue_wait_idle(self.present_queue) }
             .expect("Error waiting for presentation to finish !");
+
+        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     pub fn loop_destroyed(&self) {
@@ -1215,15 +1237,17 @@ impl VkRsApp {
 
 impl Drop for VkRsApp {
     fn drop(&mut self) {
-        unsafe {
-            self.device
-                .destroy_semaphore(self.render_finished_semaphore, None)
-        };
-        unsafe {
-            self.device
-                .destroy_semaphore(self.image_available_semaphore, None)
-        };
-        unsafe { self.device.destroy_fence(self.in_flight_fence, None) }
+        for i in 0..MAX_FRAMES_IN_FLIGHT {
+            unsafe {
+                self.device
+                    .destroy_semaphore(self.render_finished_semaphores[i], None)
+            };
+            unsafe {
+                self.device
+                    .destroy_semaphore(self.image_available_semaphores[i], None)
+            };
+            unsafe { self.device.destroy_fence(self.in_flight_fences[i], None) }
+        }
         #[cfg(debug_assertions)]
         println!("Sync objects dropped.");
 
