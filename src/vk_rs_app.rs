@@ -129,79 +129,86 @@ impl VkRsApp {
         ))
     }
 
+    fn record_command_buffer(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        image_index: u32,
+    ) -> Result<(), Box<dyn Error>> {
+        let begin_info = vk::CommandBufferBeginInfo {
+            ..Default::default()
+        };
+        unsafe {
+            self.device
+                .begin_command_buffer(command_buffer, &begin_info)
+        }?;
+        #[cfg(debug_assertions)]
+        println!("Begin command buffer.");
+
+        let clear_color = vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0f32, 0f32, 0f32, 1f32],
+            },
+        };
+        let (_, _, _, _, swap_chain_extent) = self.swap_chain;
+        let render_pass_info = vk::RenderPassBeginInfo {
+            render_pass: self.render_pass,
+            framebuffer: self.swap_chain_framebuffers[image_index as usize],
+            render_area: vk::Rect2D {
+                extent: swap_chain_extent,
+                ..Default::default()
+            },
+            clear_value_count: 1,
+            p_clear_values: &clear_color,
+            ..Default::default()
+        };
+        unsafe {
+            self.device.cmd_begin_render_pass(
+                command_buffer,
+                &render_pass_info,
+                vk::SubpassContents::INLINE,
+            )
+        };
+        #[cfg(debug_assertions)]
+        println!("Begin render pass command added.");
+
+        let (_, graphics_pipeline) = self.graphics_pipeline;
+        unsafe {
+            self.device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                graphics_pipeline,
+            )
+        };
+        #[cfg(debug_assertions)]
+        println!("Bind graphics pipeline command added.");
+
+        unsafe { self.device.cmd_draw(command_buffer, 3, 1, 0, 0) };
+        #[cfg(debug_assertions)]
+        println!("Draw command added.");
+
+        unsafe { self.device.cmd_end_render_pass(command_buffer) };
+        #[cfg(debug_assertions)]
+        println!("End render pass command added.");
+
+        unsafe { self.device.end_command_buffer(command_buffer) }?;
+        #[cfg(debug_assertions)]
+        println!("End command buffer.");
+
+        Ok(())
+    }
+
     fn create_command_buffers(
         device: &Device,
-        swap_chain_buffers: &[vk::Framebuffer],
         command_pool: vk::CommandPool,
-        render_pass: vk::RenderPass,
-        swap_chain_extent: vk::Extent2D,
-        graphics_pipeline: vk::Pipeline,
     ) -> Result<Vec<vk::CommandBuffer>, Box<dyn Error>> {
         let alloc_info = vk::CommandBufferAllocateInfo {
             command_pool: command_pool,
-            command_buffer_count: swap_chain_buffers.len() as u32,
+            command_buffer_count: MAX_FRAMES_IN_FLIGHT as u32,
             ..Default::default()
         };
         let command_buffers = unsafe { device.allocate_command_buffers(&alloc_info) }?;
         #[cfg(debug_assertions)]
         println!("Command buffers allocated.");
-
-        for (i, command_buffer) in command_buffers.iter().enumerate() {
-            let begin_info = vk::CommandBufferBeginInfo {
-                ..Default::default()
-            };
-            unsafe { device.begin_command_buffer(*command_buffer, &begin_info) }?;
-            #[cfg(debug_assertions)]
-            println!("Begin command buffer.");
-
-            let clear_color = vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [0f32, 0f32, 0f32, 1f32],
-                },
-            };
-            let render_pass_info = vk::RenderPassBeginInfo {
-                render_pass: render_pass,
-                framebuffer: swap_chain_buffers[i],
-                render_area: vk::Rect2D {
-                    extent: swap_chain_extent,
-                    ..Default::default()
-                },
-                clear_value_count: 1,
-                p_clear_values: &clear_color,
-                ..Default::default()
-            };
-            unsafe {
-                device.cmd_begin_render_pass(
-                    *command_buffer,
-                    &render_pass_info,
-                    vk::SubpassContents::INLINE,
-                )
-            };
-            #[cfg(debug_assertions)]
-            println!("Begin render pass command added.");
-
-            unsafe {
-                device.cmd_bind_pipeline(
-                    *command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    graphics_pipeline,
-                )
-            };
-            #[cfg(debug_assertions)]
-            println!("Bind graphics pipeline command added.");
-
-            unsafe { device.cmd_draw(*command_buffer, 3, 1, 0, 0) };
-            #[cfg(debug_assertions)]
-            println!("Draw command added.");
-
-            unsafe { device.cmd_end_render_pass(*command_buffer) };
-            #[cfg(debug_assertions)]
-            println!("End render pass command added.");
-
-            unsafe { device.end_command_buffer(*command_buffer) }?;
-            #[cfg(debug_assertions)]
-            println!("End command buffer.");
-        }
 
         Ok(command_buffers)
     }
@@ -211,6 +218,7 @@ impl VkRsApp {
         device_queue_family_indices: &QueueFamilyIndices,
     ) -> Result<vk::CommandPool, Box<dyn Error>> {
         let pool_info = vk::CommandPoolCreateInfo {
+            flags: vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
             queue_family_index: device_queue_family_indices
                 .graphics_family
                 .expect("Missing graphics queue family index !"),
@@ -1116,14 +1124,7 @@ impl VkRsApp {
 
         let command_pool = Self::create_command_pool(&device, &queue_family_indices)?;
 
-        let command_buffers = Self::create_command_buffers(
-            &device,
-            &swap_chain_framebuffers,
-            command_pool,
-            render_pass,
-            swap_chain_extent,
-            graphics_pipeline,
-        )?;
+        let command_buffers = Self::create_command_buffers(&device, command_pool)?;
 
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
             Self::create_sync_objects(&device)?;
@@ -1186,6 +1187,16 @@ impl VkRsApp {
         }
         .expect("Error acquiring next image !");
 
+        unsafe {
+            self.device.reset_command_buffer(
+                self.command_buffers[self.current_frame],
+                vk::CommandBufferResetFlags::default(),
+            )
+        }
+        .expect("Error resetting command buffer !");
+        self.record_command_buffer(self.command_buffers[self.current_frame], image_index)
+            .expect("Error recording command buffer !");
+
         let wait_semaphores = [self.image_available_semaphores[self.current_frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let signal_semaphores = [self.render_finished_semaphores[self.current_frame]];
@@ -1194,7 +1205,7 @@ impl VkRsApp {
             p_wait_semaphores: wait_semaphores.as_ptr(),
             p_wait_dst_stage_mask: wait_stages.as_ptr(),
             command_buffer_count: 1,
-            p_command_buffers: &self.command_buffers[image_index as usize],
+            p_command_buffers: &self.command_buffers[self.current_frame],
             signal_semaphore_count: 1,
             p_signal_semaphores: signal_semaphores.as_ptr(),
             ..Default::default()
