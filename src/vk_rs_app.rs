@@ -44,7 +44,7 @@ pub struct VkRsApp {
     instance: Instance,
     #[cfg(debug_assertions)]
     debug_utils: Option<(DebugUtils, vk::DebugUtilsMessengerEXT)>,
-    _physical_device: vk::PhysicalDevice,
+    physical_device: vk::PhysicalDevice,
     surface: (vk::SurfaceKHR, Surface),
     device: Device,
     graphics_queue: vk::Queue,
@@ -66,6 +66,9 @@ pub struct VkRsApp {
     render_finished_semaphores: Vec<vk::Semaphore>,
     in_flight_fences: Vec<vk::Fence>,
     current_frame: usize,
+    width: u32,
+    height: u32,
+    framebuffer_resized: bool,
 }
 
 #[cfg(debug_assertions)]
@@ -98,6 +101,98 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
+    fn cleanup_swap_chain(&mut self) {
+        for framebuffer in self.swap_chain_framebuffers.iter() {
+            unsafe { self.device.destroy_framebuffer(*framebuffer, None) }
+        }
+        #[cfg(debug_assertions)]
+        println!("Framebuffers dropped.");
+
+        let (pipeline_layout, graphics_pipeline) = &self.graphics_pipeline;
+        unsafe { self.device.destroy_pipeline(*graphics_pipeline, None) };
+        #[cfg(debug_assertions)]
+        println!("Graphics pipeline dropped.");
+        unsafe { self.device.destroy_pipeline_layout(*pipeline_layout, None) };
+        #[cfg(debug_assertions)]
+        println!("Pipeline layout dropped.");
+
+        unsafe { self.device.destroy_render_pass(self.render_pass, None) };
+        #[cfg(debug_assertions)]
+        println!("Render pass dropped.");
+
+        for image_view in self.swap_chain_image_views.iter() {
+            unsafe { self.device.destroy_image_view(*image_view, None) }
+        }
+        #[cfg(debug_assertions)]
+        println!("Swap chain image views dropped.");
+
+        let (swap_chain, swap_chain_loader, _, _, _) = &self.swap_chain;
+        unsafe { swap_chain_loader.destroy_swapchain(*swap_chain, None) };
+        #[cfg(debug_assertions)]
+        println!("Swap chain dropped.");
+    }
+
+    fn recreate_swap_chain(&mut self) -> Result<(), Box<dyn Error>> {
+        unsafe { self.device.device_wait_idle() }?;
+
+        self.cleanup_swap_chain();
+
+        let (surface, surface_loader) = &self.surface;
+        let swap_chain_support_details =
+            Self::query_swap_chain_support(self.physical_device, *surface, surface_loader)?;
+        let device_queue_family_indices = Self::find_queue_families(
+            &self.instance,
+            self.physical_device,
+            *surface,
+            surface_loader,
+        )?;
+
+        let (
+            swap_chain,
+            swap_chain_loader,
+            swap_chain_images,
+            swap_chain_image_format,
+            swap_chain_extent,
+        ) = Self::create_swap_chain(
+            &self.instance,
+            &self.device,
+            surface,
+            &swap_chain_support_details,
+            &device_queue_family_indices,
+            self.width,
+            self.height,
+        )?;
+
+        let swap_chain_image_views =
+            Self::create_image_views(&self.device, &swap_chain_images, swap_chain_image_format)?;
+
+        let render_pass = Self::create_render_pass(&self.device, swap_chain_image_format)?;
+
+        let (pipeline_layout, graphics_pipeline) =
+            Self::create_graphics_pipeline(&self.device, swap_chain_extent, render_pass)?;
+
+        let swap_chain_framebuffers = Self::create_framebuffers(
+            &self.device,
+            &swap_chain_image_views,
+            swap_chain_extent,
+            render_pass,
+        )?;
+
+        self.swap_chain = (
+            swap_chain,
+            swap_chain_loader,
+            swap_chain_images,
+            swap_chain_image_format,
+            swap_chain_extent,
+        );
+        self.swap_chain_image_views = swap_chain_image_views;
+        self.render_pass = render_pass;
+        self.graphics_pipeline = (pipeline_layout, graphics_pipeline);
+        self.swap_chain_framebuffers = swap_chain_framebuffers;
+
+        Ok(())
+    }
+
     fn create_sync_objects(
         device: &Device,
     ) -> Result<(Vec<vk::Semaphore>, Vec<vk::Semaphore>, Vec<vk::Fence>), Box<dyn Error>> {
@@ -1135,7 +1230,7 @@ impl VkRsApp {
             instance,
             #[cfg(debug_assertions)]
             debug_utils,
-            _physical_device: physical_device,
+            physical_device,
             surface: (surface, surface_loader),
             device,
             graphics_queue,
@@ -1157,6 +1252,9 @@ impl VkRsApp {
             render_finished_semaphores,
             in_flight_fences,
             current_frame: 0,
+            width,
+            height,
+            framebuffer_resized: false,
         })
     }
 
@@ -1169,23 +1267,33 @@ impl VkRsApp {
             )
         }
         .expect("Error waiting for fence !");
-        unsafe {
-            self.device
-                .reset_fences(&[self.in_flight_fences[self.current_frame]])
-        }
-        .expect("Error resetting fence !");
 
         let (swap_chain, swap_chain_loader, _, _, _) = &self.swap_chain;
 
-        let (image_index, _) = unsafe {
+        let (image_index, _) = match unsafe {
             swap_chain_loader.acquire_next_image(
                 *swap_chain,
                 u64::MAX,
                 self.image_available_semaphores[self.current_frame],
                 vk::Fence::null(),
             )
+        } {
+            Ok(result) => result,
+            Err(err) => match err {
+                vk::Result::ERROR_OUT_OF_DATE_KHR => {
+                    self.recreate_swap_chain()
+                        .expect("Error recreating swap chain !");
+                    return;
+                }
+                _ => panic!("Error acquiring next image !"),
+            },
+        };
+
+        unsafe {
+            self.device
+                .reset_fences(&[self.in_flight_fences[self.current_frame]])
         }
-        .expect("Error acquiring next image !");
+        .expect("Error resetting fence !");
 
         unsafe {
             self.device.reset_command_buffer(
@@ -1228,13 +1336,30 @@ impl VkRsApp {
             p_image_indices: &image_index,
             ..Default::default()
         };
-        unsafe { swap_chain_loader.queue_present(self.present_queue, &present_info) }
-            .expect("Error presenting to swap chain !");
+        let result = unsafe { swap_chain_loader.queue_present(self.present_queue, &present_info) };
+        let framebuffer_resized = match result {
+            Ok(_) => self.framebuffer_resized,
+            Err(err) => match err {
+                vk::Result::ERROR_OUT_OF_DATE_KHR => true,
+                _ => panic!("Error presenting to swap chain !"),
+            },
+        };
+        if framebuffer_resized {
+            self.framebuffer_resized = false;
+            self.recreate_swap_chain()
+                .expect("Error recreating swap chain !");
+        }
 
         unsafe { self.device.queue_wait_idle(self.present_queue) }
             .expect("Error waiting for presentation to finish !");
 
         self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+    }
+
+    pub fn window_resized(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+        self.framebuffer_resized = true;
     }
 
     pub fn loop_destroyed(&self) {
@@ -1248,6 +1373,8 @@ impl VkRsApp {
 
 impl Drop for VkRsApp {
     fn drop(&mut self) {
+        self.cleanup_swap_chain();
+
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             unsafe {
                 self.device
@@ -1265,35 +1392,6 @@ impl Drop for VkRsApp {
         unsafe { self.device.destroy_command_pool(self.command_pool, None) };
         #[cfg(debug_assertions)]
         println!("Command pool dropped.");
-
-        for framebuffer in self.swap_chain_framebuffers.iter() {
-            unsafe { self.device.destroy_framebuffer(*framebuffer, None) }
-        }
-        #[cfg(debug_assertions)]
-        println!("Framebuffers dropped.");
-
-        let (pipeline_layout, graphics_pipeline) = &self.graphics_pipeline;
-        unsafe { self.device.destroy_pipeline(*graphics_pipeline, None) };
-        #[cfg(debug_assertions)]
-        println!("Graphics pipeline dropped.");
-        unsafe { self.device.destroy_pipeline_layout(*pipeline_layout, None) };
-        #[cfg(debug_assertions)]
-        println!("Pipeline layout dropped.");
-
-        unsafe { self.device.destroy_render_pass(self.render_pass, None) };
-        #[cfg(debug_assertions)]
-        println!("Render pass dropped.");
-
-        for image_view in self.swap_chain_image_views.iter() {
-            unsafe { self.device.destroy_image_view(*image_view, None) }
-        }
-        #[cfg(debug_assertions)]
-        println!("Swap chain image views dropped.");
-
-        let (swap_chain, swap_chain_loader, _, _, _) = &self.swap_chain;
-        unsafe { swap_chain_loader.destroy_swapchain(*swap_chain, None) };
-        #[cfg(debug_assertions)]
-        println!("Swap chain dropped.");
 
         unsafe { self.device.destroy_device(None) };
         #[cfg(debug_assertions)]

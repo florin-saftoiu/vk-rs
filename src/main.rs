@@ -22,7 +22,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .build(&event_loop)?;
 
     // Init App (including Vulkan)
-    let mut vk_rs_app = VkRsApp::new(&window, 800, 600)?;
+    let mut vk_rs_app = VkRsApp::new(
+        &window,
+        window.inner_size().width,
+        window.inner_size().height,
+    )?;
+    let mut minimized = false;
 
     // Main Loop
     event_loop.run(move |event, _, control_flow| {
@@ -43,10 +48,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                         _ => (),
                     },
                 },
+                WindowEvent::Resized(size) => {
+                    if size.width == 0 || size.height == 0 {
+                        minimized = true;
+                    } else {
+                        minimized = false;
+                        vk_rs_app.window_resized(size.width, size.height);
+                    }
+                }
                 _ => (),
             },
             Event::MainEventsCleared => {
-                vk_rs_app.draw_frame();
+                if !minimized {
+                    vk_rs_app.draw_frame();
+                }
             }
             Event::LoopDestroyed => {
                 vk_rs_app.loop_destroyed();
