@@ -1039,7 +1039,7 @@ impl VkRsApp {
         // Init Vulkan
         // Ash loads Vulkan dynamically, ash::Entry is the library loader and the entrypoint into the Vulkan API.
         // In the future, Ash should also support loading Vulkan as a static library.
-        let entry = unsafe { Entry::new() }?;
+        let entry = Entry::linked();
 
         let app_info = vk::ApplicationInfo {
             api_version: vk::make_api_version(0, 1, 0, 0),
@@ -1060,12 +1060,8 @@ impl VkRsApp {
             if enable_validation_layers {
                 println!("Validation layers available.");
 
-                let mut enabled_extension_names = required_extensions;
-                enabled_extension_names.push(DebugUtils::name());
-                let p_enabled_extension_names = enabled_extension_names
-                    .iter()
-                    .map(|e| e.as_ptr())
-                    .collect::<Vec<*const i8>>();
+                let mut enabled_extension_names = required_extensions.to_vec();
+                enabled_extension_names.push(DebugUtils::name().as_ptr());
 
                 let enabled_layer_names = VALIDATION_LAYERS
                     .iter()
@@ -1078,8 +1074,12 @@ impl VkRsApp {
 
                 let instance_debug_utils_messenger_create_info =
                     vk::DebugUtilsMessengerCreateInfoEXT {
-                        message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::all(),
-                        message_type: vk::DebugUtilsMessageTypeFlagsEXT::all(),
+                        message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                        message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
                         pfn_user_callback: Some(vk_debug_utils_callback),
                         ..Default::default()
                     };
@@ -1092,7 +1092,7 @@ impl VkRsApp {
                     enabled_layer_count: p_enabled_layer_names.len() as u32,
                     pp_enabled_layer_names: p_enabled_layer_names.as_ptr(),
                     enabled_extension_count: enabled_extension_names.len() as u32,
-                    pp_enabled_extension_names: p_enabled_extension_names.as_ptr(),
+                    pp_enabled_extension_names: enabled_extension_names.as_ptr(),
                     ..Default::default()
                 };
 
@@ -1101,8 +1101,12 @@ impl VkRsApp {
 
                 let debug_utils_loader = DebugUtils::new(&entry, &instance);
                 let messenger_create_info = vk::DebugUtilsMessengerCreateInfoEXT {
-                    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::all(),
-                    message_type: vk::DebugUtilsMessageTypeFlagsEXT::all(),
+                    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                    message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
                     pfn_user_callback: Some(vk_debug_utils_callback),
                     ..Default::default()
                 };
@@ -1115,15 +1119,10 @@ impl VkRsApp {
             } else {
                 println!("Validation layers not available.");
 
-                let p_enabled_extension_names = required_extensions
-                    .iter()
-                    .map(|e| e.as_ptr())
-                    .collect::<Vec<*const i8>>();
-
                 let create_info = vk::InstanceCreateInfo {
                     p_application_info: &app_info,
                     enabled_extension_count: required_extensions.len() as u32,
-                    pp_enabled_extension_names: p_enabled_extension_names.as_ptr(),
+                    pp_enabled_extension_names: required_extensions.as_ptr(),
                     ..Default::default()
                 };
                 instance = unsafe { entry.create_instance(&create_info, None) }?;
@@ -1135,14 +1134,10 @@ impl VkRsApp {
 
         #[cfg(not(debug_assertions))]
         {
-            let p_enabled_extension_names = required_extensions
-                .iter()
-                .map(|e| e.as_ptr())
-                .collect::<Vec<*const i8>>();
             let create_info = vk::InstanceCreateInfo {
                 p_application_info: &app_info,
                 enabled_extension_count: required_extensions.len() as u32,
-                pp_enabled_extension_names: p_enabled_extension_names.as_ptr(),
+                pp_enabled_extension_names: required_extensions.as_ptr(),
                 ..Default::default()
             };
             instance = unsafe { entry.create_instance(&create_info, None) }?;
