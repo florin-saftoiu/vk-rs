@@ -1036,7 +1036,6 @@ impl VkRsApp {
     ) -> Result<Self, Box<dyn Error>> {
         // Init Vulkan
         // Ash loads Vulkan dynamically, ash::Entry is the library loader and the entrypoint into the Vulkan API.
-        // In the future, Ash should also support loading Vulkan as a static library.
         let entry = Entry::linked();
 
         let app_info = vk::ApplicationInfo {
