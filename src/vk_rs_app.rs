@@ -56,7 +56,8 @@ pub struct VkRsApp {
     swapchain_extent: vk::Extent2D,
     swapchain_image_views: Vec<vk::ImageView>,
     render_pass: vk::RenderPass,
-    graphics_pipeline: (vk::PipelineLayout, vk::Pipeline),
+    pipeline_layout: vk::PipelineLayout,
+    graphics_pipeline: vk::Pipeline,
     swapchain_framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
@@ -106,11 +107,13 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Framebuffers dropped.");
 
-        let (pipeline_layout, graphics_pipeline) = &self.graphics_pipeline;
-        unsafe { self.device.destroy_pipeline(*graphics_pipeline, None) };
+        unsafe { self.device.destroy_pipeline(self.graphics_pipeline, None) };
         #[cfg(debug_assertions)]
         println!("Graphics pipeline dropped.");
-        unsafe { self.device.destroy_pipeline_layout(*pipeline_layout, None) };
+        unsafe {
+            self.device
+                .destroy_pipeline_layout(self.pipeline_layout, None)
+        };
         #[cfg(debug_assertions)]
         println!("Pipeline layout dropped.");
 
@@ -178,7 +181,8 @@ impl VkRsApp {
         self.swapchain_extent = swapchain_extent;
         self.swapchain_image_views = swapchain_image_views;
         self.render_pass = render_pass;
-        self.graphics_pipeline = (pipeline_layout, graphics_pipeline);
+        self.pipeline_layout = pipeline_layout;
+        self.graphics_pipeline = graphics_pipeline;
         self.swapchain_framebuffers = swapchain_framebuffers;
 
         Ok(())
@@ -256,12 +260,11 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Begin render pass command added.");
 
-        let (_, graphics_pipeline) = self.graphics_pipeline;
         unsafe {
             self.device.cmd_bind_pipeline(
                 command_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
-                graphics_pipeline,
+                self.graphics_pipeline,
             )
         };
         #[cfg(debug_assertions)]
@@ -1202,7 +1205,8 @@ impl VkRsApp {
             swapchain_extent,
             swapchain_image_views,
             render_pass,
-            graphics_pipeline: (pipeline_layout, graphics_pipeline),
+            pipeline_layout,
+            graphics_pipeline,
             swapchain_framebuffers,
             command_pool,
             command_buffers,
