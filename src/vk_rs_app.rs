@@ -45,7 +45,7 @@ pub struct VkRsApp {
     #[cfg(debug_assertions)]
     debug_utils: Option<(DebugUtils, vk::DebugUtilsMessengerEXT)>,
     physical_device: vk::PhysicalDevice,
-    surface: (vk::SurfaceKHR, Surface),
+    surface: (Surface, vk::SurfaceKHR),
     device: Device,
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
@@ -137,14 +137,14 @@ impl VkRsApp {
 
         self.cleanup_swapchain();
 
-        let (surface, surface_loader) = &self.surface;
+        let (surface_loader, surface) = &self.surface;
         let swapchain_support_details =
-            Self::query_swapchain_support(self.physical_device, *surface, surface_loader)?;
+            Self::query_swapchain_support(self.physical_device, surface_loader, *surface)?;
         let device_queue_family_indices = Self::find_queue_families(
             &self.instance,
             self.physical_device,
-            *surface,
             surface_loader,
+            *surface,
         )?;
 
         let (
@@ -567,8 +567,8 @@ impl VkRsApp {
 
     fn query_swapchain_support(
         physical_device: vk::PhysicalDevice,
-        surface: vk::SurfaceKHR,
         surface_loader: &Surface,
+        surface: vk::SurfaceKHR,
     ) -> Result<SwapchainSupportDetails, Box<dyn Error>> {
         let capabilities = unsafe {
             surface_loader.get_physical_device_surface_capabilities(physical_device, surface)
@@ -770,8 +770,8 @@ impl VkRsApp {
     fn find_queue_families(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
-        surface: vk::SurfaceKHR,
         surface_loader: &Surface,
+        surface: vk::SurfaceKHR,
     ) -> Result<QueueFamilyIndices, Box<dyn Error>> {
         // Vulkan commands are submitted in queues. There are multiple families of queues and each family allows certain commands.
         // We need to find the indices of the queue families that allow the commands we need.
@@ -811,8 +811,8 @@ impl VkRsApp {
 
     fn pick_physical_device(
         instance: &Instance,
-        surface: vk::SurfaceKHR,
         surface_loader: &Surface,
+        surface: vk::SurfaceKHR,
     ) -> Result<
         (
             vk::PhysicalDevice,
@@ -828,7 +828,7 @@ impl VkRsApp {
                 unsafe { instance.get_physical_device_properties(physical_device) };
             let device_features = unsafe { instance.get_physical_device_features(physical_device) };
             let device_queue_family_indices =
-                Self::find_queue_families(instance, physical_device, surface, surface_loader)?;
+                Self::find_queue_families(instance, physical_device, surface_loader, surface)?;
 
             if device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU
                 && device_features.geometry_shader == vk::TRUE
@@ -840,7 +840,7 @@ impl VkRsApp {
                 )?
             {
                 let swapchain_support_details =
-                    Self::query_swapchain_support(physical_device, surface, surface_loader)?;
+                    Self::query_swapchain_support(physical_device, surface_loader, surface)?;
 
                 if !swapchain_support_details.formats.is_empty()
                     && !swapchain_support_details.present_modes.is_empty()
@@ -1141,14 +1141,14 @@ impl VkRsApp {
             instance = unsafe { entry.create_instance(&create_info, None) }?;
         }
 
+        let surface_loader = Surface::new(&entry, &instance);
         let surface =
             unsafe { ash_window::create_surface(&entry, &instance, window_handle, None) }?;
-        let surface_loader = Surface::new(&entry, &instance);
         #[cfg(debug_assertions)]
         println!("Window surface created.");
 
         let (physical_device, queue_family_indices, swapchain_support_details) =
-            Self::pick_physical_device(&instance, surface, &surface_loader)?;
+            Self::pick_physical_device(&instance, &surface_loader, surface)?;
         let device = Self::create_logical_device(
             #[cfg(debug_assertions)]
             enable_validation_layers,
@@ -1224,7 +1224,7 @@ impl VkRsApp {
             #[cfg(debug_assertions)]
             debug_utils,
             physical_device,
-            surface: (surface, surface_loader),
+            surface: (surface_loader, surface),
             device,
             graphics_queue,
             present_queue,
@@ -1390,7 +1390,7 @@ impl Drop for VkRsApp {
         #[cfg(debug_assertions)]
         println!("Logical device dropped.");
 
-        let (surface, surface_loader) = &self.surface;
+        let (surface_loader, surface) = &self.surface;
         unsafe { surface_loader.destroy_surface(*surface, None) };
         #[cfg(debug_assertions)]
         println!("Window surface dropped.");
