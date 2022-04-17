@@ -45,7 +45,8 @@ pub struct VkRsApp {
     #[cfg(debug_assertions)]
     debug_utils: Option<(DebugUtils, vk::DebugUtilsMessengerEXT)>,
     physical_device: vk::PhysicalDevice,
-    surface: (Surface, vk::SurfaceKHR),
+    surface_loader: Surface,
+    surface: vk::SurfaceKHR,
     device: Device,
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
@@ -140,20 +141,22 @@ impl VkRsApp {
 
         self.cleanup_swapchain();
 
-        let (surface_loader, surface) = &self.surface;
-        let swapchain_support_details =
-            Self::query_swapchain_support(self.physical_device, surface_loader, *surface)?;
+        let swapchain_support_details = Self::query_swapchain_support(
+            self.physical_device,
+            &self.surface_loader,
+            self.surface,
+        )?;
         let device_queue_family_indices = Self::find_queue_families(
             &self.instance,
             self.physical_device,
-            surface_loader,
-            *surface,
+            &self.surface_loader,
+            self.surface,
         )?;
 
         let (swapchain, swapchain_images, swapchain_image_format, swapchain_extent) =
             Self::create_swapchain(
                 &self.swapchain_loader,
-                surface,
+                &self.surface,
                 &swapchain_support_details,
                 &device_queue_family_indices,
                 self.width,
@@ -1194,7 +1197,8 @@ impl VkRsApp {
             #[cfg(debug_assertions)]
             debug_utils,
             physical_device,
-            surface: (surface_loader, surface),
+            surface_loader,
+            surface,
             device,
             graphics_queue,
             present_queue,
@@ -1360,8 +1364,7 @@ impl Drop for VkRsApp {
         #[cfg(debug_assertions)]
         println!("Logical device dropped.");
 
-        let (surface_loader, surface) = &self.surface;
-        unsafe { surface_loader.destroy_surface(*surface, None) };
+        unsafe { self.surface_loader.destroy_surface(self.surface, None) };
         #[cfg(debug_assertions)]
         println!("Window surface dropped.");
 
