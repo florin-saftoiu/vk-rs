@@ -33,7 +33,7 @@ impl QueueFamilyIndices {
     }
 }
 
-struct SwapChainSupportDetails {
+struct SwapchainSupportDetails {
     capabilities: vk::SurfaceCapabilitiesKHR,
     formats: Vec<vk::SurfaceFormatKHR>,
     present_modes: Vec<vk::PresentModeKHR>,
@@ -49,17 +49,17 @@ pub struct VkRsApp {
     device: Device,
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
-    swap_chain: (
-        vk::SwapchainKHR,
+    swapchain: (
         Swapchain,
+        vk::SwapchainKHR,
         Vec<vk::Image>,
         vk::Format,
         vk::Extent2D,
     ),
-    swap_chain_image_views: Vec<vk::ImageView>,
+    swapchain_image_views: Vec<vk::ImageView>,
     render_pass: vk::RenderPass,
     graphics_pipeline: (vk::PipelineLayout, vk::Pipeline),
-    swap_chain_framebuffers: Vec<vk::Framebuffer>,
+    swapchain_framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     image_available_semaphores: Vec<vk::Semaphore>,
@@ -101,8 +101,8 @@ unsafe extern "system" fn vk_debug_utils_callback(
 }
 
 impl VkRsApp {
-    fn cleanup_swap_chain(&mut self) {
-        for framebuffer in self.swap_chain_framebuffers.iter() {
+    fn cleanup_swapchain(&mut self) {
+        for framebuffer in self.swapchain_framebuffers.iter() {
             unsafe { self.device.destroy_framebuffer(*framebuffer, None) }
         }
         #[cfg(debug_assertions)]
@@ -120,26 +120,26 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Render pass dropped.");
 
-        for image_view in self.swap_chain_image_views.iter() {
+        for image_view in self.swapchain_image_views.iter() {
             unsafe { self.device.destroy_image_view(*image_view, None) }
         }
         #[cfg(debug_assertions)]
-        println!("Swap chain image views dropped.");
+        println!("Swapchain image views dropped.");
 
-        let (swap_chain, swap_chain_loader, _, _, _) = &self.swap_chain;
-        unsafe { swap_chain_loader.destroy_swapchain(*swap_chain, None) };
+        let (swapchain_loader, swapchain, _, _, _) = &self.swapchain;
+        unsafe { swapchain_loader.destroy_swapchain(*swapchain, None) };
         #[cfg(debug_assertions)]
-        println!("Swap chain dropped.");
+        println!("Swapchain dropped.");
     }
 
-    fn recreate_swap_chain(&mut self) -> Result<(), Box<dyn Error>> {
+    fn recreate_swapchain(&mut self) -> Result<(), Box<dyn Error>> {
         unsafe { self.device.device_wait_idle() }?;
 
-        self.cleanup_swap_chain();
+        self.cleanup_swapchain();
 
         let (surface, surface_loader) = &self.surface;
-        let swap_chain_support_details =
-            Self::query_swap_chain_support(self.physical_device, *surface, surface_loader)?;
+        let swapchain_support_details =
+            Self::query_swapchain_support(self.physical_device, *surface, surface_loader)?;
         let device_queue_family_indices = Self::find_queue_families(
             &self.instance,
             self.physical_device,
@@ -148,47 +148,47 @@ impl VkRsApp {
         )?;
 
         let (
-            swap_chain,
-            swap_chain_loader,
-            swap_chain_images,
-            swap_chain_image_format,
-            swap_chain_extent,
-        ) = Self::create_swap_chain(
+            swapchain_loader,
+            swapchain,
+            swapchain_images,
+            swapchain_image_format,
+            swapchain_extent,
+        ) = Self::create_swapchain(
             &self.instance,
             &self.device,
             surface,
-            &swap_chain_support_details,
+            &swapchain_support_details,
             &device_queue_family_indices,
             self.width,
             self.height,
         )?;
 
-        let swap_chain_image_views =
-            Self::create_image_views(&self.device, &swap_chain_images, swap_chain_image_format)?;
+        let swapchain_image_views =
+            Self::create_image_views(&self.device, &swapchain_images, swapchain_image_format)?;
 
-        let render_pass = Self::create_render_pass(&self.device, swap_chain_image_format)?;
+        let render_pass = Self::create_render_pass(&self.device, swapchain_image_format)?;
 
         let (pipeline_layout, graphics_pipeline) =
-            Self::create_graphics_pipeline(&self.device, swap_chain_extent, render_pass)?;
+            Self::create_graphics_pipeline(&self.device, swapchain_extent, render_pass)?;
 
-        let swap_chain_framebuffers = Self::create_framebuffers(
+        let swapchain_framebuffers = Self::create_framebuffers(
             &self.device,
-            &swap_chain_image_views,
-            swap_chain_extent,
+            &swapchain_image_views,
+            swapchain_extent,
             render_pass,
         )?;
 
-        self.swap_chain = (
-            swap_chain,
-            swap_chain_loader,
-            swap_chain_images,
-            swap_chain_image_format,
-            swap_chain_extent,
+        self.swapchain = (
+            swapchain_loader,
+            swapchain,
+            swapchain_images,
+            swapchain_image_format,
+            swapchain_extent,
         );
-        self.swap_chain_image_views = swap_chain_image_views;
+        self.swapchain_image_views = swapchain_image_views;
         self.render_pass = render_pass;
         self.graphics_pipeline = (pipeline_layout, graphics_pipeline);
-        self.swap_chain_framebuffers = swap_chain_framebuffers;
+        self.swapchain_framebuffers = swapchain_framebuffers;
 
         Ok(())
     }
@@ -244,12 +244,12 @@ impl VkRsApp {
                 float32: [0f32, 0f32, 0f32, 1f32],
             },
         };
-        let (_, _, _, _, swap_chain_extent) = self.swap_chain;
+        let (_, _, _, _, swapchain_extent) = self.swapchain;
         let render_pass_info = vk::RenderPassBeginInfo {
             render_pass: self.render_pass,
-            framebuffer: self.swap_chain_framebuffers[image_index as usize],
+            framebuffer: self.swapchain_framebuffers[image_index as usize],
             render_area: vk::Rect2D {
-                extent: swap_chain_extent,
+                extent: swapchain_extent,
                 ..Default::default()
             },
             clear_value_count: 1,
@@ -328,20 +328,20 @@ impl VkRsApp {
 
     fn create_framebuffers(
         device: &Device,
-        swap_chain_image_views: &[vk::ImageView],
-        swap_chain_extent: vk::Extent2D,
+        swapchain_image_views: &[vk::ImageView],
+        swapchain_extent: vk::Extent2D,
         render_pass: vk::RenderPass,
     ) -> Result<Vec<vk::Framebuffer>, Box<dyn Error>> {
-        let swap_chain_framebuffers = swap_chain_image_views
+        let swapchain_framebuffers = swapchain_image_views
             .iter()
-            .map(|swap_chain_image_view| {
-                let attachments = [*swap_chain_image_view];
+            .map(|swapchain_image_view| {
+                let attachments = [*swapchain_image_view];
                 let framebuffer_info = vk::FramebufferCreateInfo {
                     render_pass: render_pass,
                     attachment_count: 1,
                     p_attachments: attachments.as_ptr(),
-                    width: swap_chain_extent.width,
-                    height: swap_chain_extent.height,
+                    width: swapchain_extent.width,
+                    height: swapchain_extent.height,
                     layers: 1,
                     ..Default::default()
                 };
@@ -353,15 +353,15 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Framebuffers created.");
 
-        Ok(swap_chain_framebuffers)
+        Ok(swapchain_framebuffers)
     }
 
     fn create_render_pass(
         device: &Device,
-        swap_chain_image_format: vk::Format,
+        swapchain_image_format: vk::Format,
     ) -> Result<vk::RenderPass, Box<dyn Error>> {
         let color_attachment = vk::AttachmentDescription {
-            format: swap_chain_image_format,
+            format: swapchain_image_format,
             samples: vk::SampleCountFlags::TYPE_1,
             load_op: vk::AttachmentLoadOp::CLEAR,
             stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
@@ -425,7 +425,7 @@ impl VkRsApp {
 
     fn create_graphics_pipeline(
         device: &Device,
-        swap_chain_extent: vk::Extent2D,
+        swapchain_extent: vk::Extent2D,
         render_pass: vk::RenderPass,
     ) -> Result<(vk::PipelineLayout, vk::Pipeline), Box<dyn Error>> {
         let vert_shader = read_shader(Path::new("shaders/vert.spv"))?;
@@ -465,14 +465,14 @@ impl VkRsApp {
         };
 
         let viewport = vk::Viewport {
-            width: swap_chain_extent.width as f32,
-            height: swap_chain_extent.height as f32,
+            width: swapchain_extent.width as f32,
+            height: swapchain_extent.height as f32,
             max_depth: 1f32,
             ..Default::default()
         };
 
         let scissor = vk::Rect2D {
-            extent: swap_chain_extent,
+            extent: swapchain_extent,
             ..Default::default()
         };
 
@@ -565,26 +565,26 @@ impl VkRsApp {
         Ok((pipeline_layout, graphics_pipelines[0]))
     }
 
-    fn query_swap_chain_support(
+    fn query_swapchain_support(
         physical_device: vk::PhysicalDevice,
         surface: vk::SurfaceKHR,
         surface_loader: &Surface,
-    ) -> Result<SwapChainSupportDetails, Box<dyn Error>> {
+    ) -> Result<SwapchainSupportDetails, Box<dyn Error>> {
         let capabilities = unsafe {
             surface_loader.get_physical_device_surface_capabilities(physical_device, surface)
         }
-        .expect("Error querying swap chain capabilities !");
+        .expect("Error querying swapchain capabilities !");
 
         let formats =
             unsafe { surface_loader.get_physical_device_surface_formats(physical_device, surface) }
-                .expect("Error querying swap chain formats !");
+                .expect("Error querying swapchain formats !");
 
         let present_modes = unsafe {
             surface_loader.get_physical_device_surface_present_modes(physical_device, surface)
         }
-        .expect("Error querying swap chain present modes !");
+        .expect("Error querying swapchain present modes !");
 
-        Ok(SwapChainSupportDetails {
+        Ok(SwapchainSupportDetails {
             capabilities,
             formats,
             present_modes,
@@ -638,38 +638,37 @@ impl VkRsApp {
         }
     }
 
-    fn create_swap_chain(
+    fn create_swapchain(
         instance: &Instance,
         device: &Device,
         surface: &vk::SurfaceKHR,
-        swap_chain_support_details: &SwapChainSupportDetails,
+        swapchain_support_details: &SwapchainSupportDetails,
         device_queue_family_indices: &QueueFamilyIndices,
         width: u32,
         height: u32,
     ) -> Result<
         (
-            vk::SwapchainKHR,
             Swapchain,
+            vk::SwapchainKHR,
             Vec<vk::Image>,
             vk::Format,
             vk::Extent2D,
         ),
         Box<dyn Error>,
     > {
-        let surface_format = Self::choose_swap_surface_format(&swap_chain_support_details.formats);
-        let present_mode =
-            Self::choose_swap_present_mode(&swap_chain_support_details.present_modes);
+        let surface_format = Self::choose_swap_surface_format(&swapchain_support_details.formats);
+        let present_mode = Self::choose_swap_present_mode(&swapchain_support_details.present_modes);
         let extent =
-            Self::choose_swap_extent(&swap_chain_support_details.capabilities, width, height);
+            Self::choose_swap_extent(&swapchain_support_details.capabilities, width, height);
         // Require at least one more image than the minimum to avoid waiting for the driver to complete its job.
-        let mut image_count = swap_chain_support_details.capabilities.min_image_count + 1;
-        if swap_chain_support_details.capabilities.max_image_count > 0
-            && image_count > swap_chain_support_details.capabilities.max_image_count
+        let mut image_count = swapchain_support_details.capabilities.min_image_count + 1;
+        if swapchain_support_details.capabilities.max_image_count > 0
+            && image_count > swapchain_support_details.capabilities.max_image_count
         {
-            image_count = swap_chain_support_details.capabilities.max_image_count;
+            image_count = swapchain_support_details.capabilities.max_image_count;
         }
 
-        let swap_chain_create_info = vk::SwapchainCreateInfoKHR {
+        let swapchain_create_info = vk::SwapchainCreateInfoKHR {
             surface: *surface,
             min_image_count: image_count,
             image_format: surface_format.format,
@@ -706,7 +705,7 @@ impl VkRsApp {
             } else {
                 vec![].as_ptr()
             },
-            pre_transform: swap_chain_support_details.capabilities.current_transform,
+            pre_transform: swapchain_support_details.capabilities.current_transform,
             composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
             present_mode,
             clipped: vk::TRUE,
@@ -714,18 +713,17 @@ impl VkRsApp {
             ..Default::default()
         };
 
-        let swap_chain_loader = Swapchain::new(instance, device);
-        let swap_chain =
-            unsafe { swap_chain_loader.create_swapchain(&swap_chain_create_info, None) }?;
+        let swapchain_loader = Swapchain::new(instance, device);
+        let swapchain = unsafe { swapchain_loader.create_swapchain(&swapchain_create_info, None) }?;
         #[cfg(debug_assertions)]
-        println!("Swap chain created.");
+        println!("Swapchain created.");
 
-        let swap_chain_images = unsafe { swap_chain_loader.get_swapchain_images(swap_chain) }?;
+        let swapchain_images = unsafe { swapchain_loader.get_swapchain_images(swapchain) }?;
 
         Ok((
-            swap_chain,
-            swap_chain_loader,
-            swap_chain_images,
+            swapchain_loader,
+            swapchain,
+            swapchain_images,
             surface_format.format,
             extent,
         ))
@@ -733,16 +731,16 @@ impl VkRsApp {
 
     fn create_image_views(
         device: &Device,
-        swap_chain_images: &[vk::Image],
-        swap_chain_image_format: vk::Format,
+        swapchain_images: &[vk::Image],
+        swapchain_image_format: vk::Format,
     ) -> Result<Vec<vk::ImageView>, Box<dyn Error>> {
-        let swap_chain_image_views = swap_chain_images
+        let swapchain_image_views = swapchain_images
             .iter()
             .map(|image| {
                 let image_view_create_info = vk::ImageViewCreateInfo {
                     image: *image,
                     view_type: vk::ImageViewType::TYPE_2D,
-                    format: swap_chain_image_format,
+                    format: swapchain_image_format,
                     components: vk::ComponentMapping {
                         r: vk::ComponentSwizzle::IDENTITY,
                         g: vk::ComponentSwizzle::IDENTITY,
@@ -759,14 +757,14 @@ impl VkRsApp {
                     ..Default::default()
                 };
                 let image_view = unsafe { device.create_image_view(&image_view_create_info, None) }
-                    .expect("Error creating swap chain image view !");
+                    .expect("Error creating swapchain image view !");
                 image_view
             })
             .collect();
         #[cfg(debug_assertions)]
-        println!("Swap chain image views created.");
+        println!("Swapchain image views created.");
 
-        Ok(swap_chain_image_views)
+        Ok(swapchain_image_views)
     }
 
     fn find_queue_families(
@@ -819,7 +817,7 @@ impl VkRsApp {
         (
             vk::PhysicalDevice,
             QueueFamilyIndices,
-            SwapChainSupportDetails,
+            SwapchainSupportDetails,
         ),
         Box<dyn Error>,
     > {
@@ -841,11 +839,11 @@ impl VkRsApp {
                     &DEVICE_EXTENSIONS,
                 )?
             {
-                let swap_chain_support_details =
-                    Self::query_swap_chain_support(physical_device, surface, surface_loader)?;
+                let swapchain_support_details =
+                    Self::query_swapchain_support(physical_device, surface, surface_loader)?;
 
-                if !swap_chain_support_details.formats.is_empty()
-                    && !swap_chain_support_details.present_modes.is_empty()
+                if !swapchain_support_details.formats.is_empty()
+                    && !swapchain_support_details.present_modes.is_empty()
                 {
                     #[cfg(debug_assertions)]
                     {
@@ -861,7 +859,7 @@ impl VkRsApp {
                     return Ok((
                         physical_device,
                         device_queue_family_indices,
-                        swap_chain_support_details,
+                        swapchain_support_details,
                     ));
                 }
             }
@@ -1149,7 +1147,7 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Window surface created.");
 
-        let (physical_device, queue_family_indices, swap_chain_support_details) =
+        let (physical_device, queue_family_indices, swapchain_support_details) =
             Self::pick_physical_device(&instance, surface, &surface_loader)?;
         let device = Self::create_logical_device(
             #[cfg(debug_assertions)]
@@ -1182,33 +1180,33 @@ impl VkRsApp {
         println!("Present queue handle retrieved.");
 
         let (
-            swap_chain,
-            swap_chain_loader,
-            swap_chain_images,
-            swap_chain_image_format,
-            swap_chain_extent,
-        ) = Self::create_swap_chain(
+            swapchain_loader,
+            swapchain,
+            swapchain_images,
+            swapchain_image_format,
+            swapchain_extent,
+        ) = Self::create_swapchain(
             &instance,
             &device,
             &surface,
-            &swap_chain_support_details,
+            &swapchain_support_details,
             &queue_family_indices,
             width,
             height,
         )?;
 
-        let swap_chain_image_views =
-            Self::create_image_views(&device, &swap_chain_images, swap_chain_image_format)?;
+        let swapchain_image_views =
+            Self::create_image_views(&device, &swapchain_images, swapchain_image_format)?;
 
-        let render_pass = Self::create_render_pass(&device, swap_chain_image_format)?;
+        let render_pass = Self::create_render_pass(&device, swapchain_image_format)?;
 
         let (pipeline_layout, graphics_pipeline) =
-            Self::create_graphics_pipeline(&device, swap_chain_extent, render_pass)?;
+            Self::create_graphics_pipeline(&device, swapchain_extent, render_pass)?;
 
-        let swap_chain_framebuffers = Self::create_framebuffers(
+        let swapchain_framebuffers = Self::create_framebuffers(
             &device,
-            &swap_chain_image_views,
-            swap_chain_extent,
+            &swapchain_image_views,
+            swapchain_extent,
             render_pass,
         )?;
 
@@ -1230,17 +1228,17 @@ impl VkRsApp {
             device,
             graphics_queue,
             present_queue,
-            swap_chain: (
-                swap_chain,
-                swap_chain_loader,
-                swap_chain_images,
-                swap_chain_image_format,
-                swap_chain_extent,
+            swapchain: (
+                swapchain_loader,
+                swapchain,
+                swapchain_images,
+                swapchain_image_format,
+                swapchain_extent,
             ),
-            swap_chain_image_views,
+            swapchain_image_views,
             render_pass,
             graphics_pipeline: (pipeline_layout, graphics_pipeline),
-            swap_chain_framebuffers,
+            swapchain_framebuffers,
             command_pool,
             command_buffers,
             image_available_semaphores,
@@ -1263,11 +1261,11 @@ impl VkRsApp {
         }
         .expect("Error waiting for fence !");
 
-        let (swap_chain, swap_chain_loader, _, _, _) = &self.swap_chain;
+        let (swapchain_loader, swapchain, _, _, _) = &self.swapchain;
 
         let (image_index, _) = match unsafe {
-            swap_chain_loader.acquire_next_image(
-                *swap_chain,
+            swapchain_loader.acquire_next_image(
+                *swapchain,
                 u64::MAX,
                 self.image_available_semaphores[self.current_frame],
                 vk::Fence::null(),
@@ -1276,8 +1274,8 @@ impl VkRsApp {
             Ok(result) => result,
             Err(err) => match err {
                 vk::Result::ERROR_OUT_OF_DATE_KHR => {
-                    self.recreate_swap_chain()
-                        .expect("Error recreating swap chain !");
+                    self.recreate_swapchain()
+                        .expect("Error recreating swapchain !");
                     return;
                 }
                 _ => panic!("Error acquiring next image !"),
@@ -1322,27 +1320,27 @@ impl VkRsApp {
         }
         .expect("Error submitting command buffer !");
 
-        let swap_chains = [*swap_chain];
+        let swapchains = [*swapchain];
         let present_info = vk::PresentInfoKHR {
             wait_semaphore_count: 1,
             p_wait_semaphores: signal_semaphores.as_ptr(),
             swapchain_count: 1,
-            p_swapchains: swap_chains.as_ptr(),
+            p_swapchains: swapchains.as_ptr(),
             p_image_indices: &image_index,
             ..Default::default()
         };
-        let result = unsafe { swap_chain_loader.queue_present(self.present_queue, &present_info) };
+        let result = unsafe { swapchain_loader.queue_present(self.present_queue, &present_info) };
         let framebuffer_resized = match result {
             Ok(_) => self.framebuffer_resized,
             Err(err) => match err {
                 vk::Result::ERROR_OUT_OF_DATE_KHR => true,
-                _ => panic!("Error presenting to swap chain !"),
+                _ => panic!("Error presenting to swapchain !"),
             },
         };
         if framebuffer_resized {
             self.framebuffer_resized = false;
-            self.recreate_swap_chain()
-                .expect("Error recreating swap chain !");
+            self.recreate_swapchain()
+                .expect("Error recreating swapchain !");
         }
 
         unsafe { self.device.queue_wait_idle(self.present_queue) }
@@ -1368,7 +1366,7 @@ impl VkRsApp {
 
 impl Drop for VkRsApp {
     fn drop(&mut self) {
-        self.cleanup_swap_chain();
+        self.cleanup_swapchain();
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             unsafe {
