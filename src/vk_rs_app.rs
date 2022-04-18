@@ -9,6 +9,7 @@ use ash::{
     extensions::khr::{Surface, Swapchain},
     vk, Device, Entry, Instance,
 };
+use memoffset::offset_of;
 
 #[cfg(debug_assertions)]
 const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
@@ -38,6 +39,54 @@ struct SwapchainSupportDetails {
     formats: Vec<vk::SurfaceFormatKHR>,
     present_modes: Vec<vk::PresentModeKHR>,
 }
+
+#[repr(C)]
+struct Vertex {
+    pos: [f32; 2],
+    color: [f32; 3],
+}
+
+impl Vertex {
+    fn get_binding_description() -> vk::VertexInputBindingDescription {
+        vk::VertexInputBindingDescription {
+            binding: 0,
+            stride: std::mem::size_of::<Self>() as u32,
+            input_rate: vk::VertexInputRate::VERTEX,
+        }
+    }
+
+    fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 2] {
+        [
+            vk::VertexInputAttributeDescription {
+                binding: 0,
+                location: 0,
+                format: vk::Format::R32G32_SFLOAT,
+                offset: offset_of!(Self, pos) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                binding: 0,
+                location: 1,
+                format: vk::Format::R32G32B32_SFLOAT,
+                offset: offset_of!(Self, color) as u32,
+            },
+        ]
+    }
+}
+
+const VERTICES: [Vertex; 3] = [
+    Vertex {
+        pos: [0.0, -0.5],
+        color: [1.0, 1.0, 1.0],
+    },
+    Vertex {
+        pos: [0.5, 0.5],
+        color: [0.0, 1.0, 0.0],
+    },
+    Vertex {
+        pos: [-0.5, 0.5],
+        color: [0.0, 0.0, 1.0],
+    },
+];
 
 pub struct VkRsApp {
     _entry: Entry,
@@ -69,6 +118,8 @@ pub struct VkRsApp {
     width: u32,
     height: u32,
     framebuffer_resized: bool,
+    vertex_buffer: vk::Buffer,
+    vertex_buffer_memory: vk::DeviceMemory,
 }
 
 #[cfg(debug_assertions)]
@@ -273,7 +324,17 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Bind graphics pipeline command added.");
 
-        unsafe { self.device.cmd_draw(command_buffer, 3, 1, 0, 0) };
+        unsafe {
+            self.device
+                .cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer], &[0])
+        }
+        #[cfg(debug_assertions)]
+        println!("Bind vertex buffers command added.");
+
+        unsafe {
+            self.device
+                .cmd_draw(command_buffer, VERTICES.len() as u32, 1, 0, 0)
+        };
         #[cfg(debug_assertions)]
         println!("Draw command added.");
 
@@ -302,6 +363,74 @@ impl VkRsApp {
         println!("Command buffers allocated.");
 
         Ok(command_buffers)
+    }
+
+    fn find_memory_type(
+        instance: &Instance,
+        physical_device: &vk::PhysicalDevice,
+        type_filter: u32,
+        properties: vk::MemoryPropertyFlags,
+    ) -> Result<u32, Box<dyn Error>> {
+        let mem_properties =
+            unsafe { instance.get_physical_device_memory_properties(*physical_device) };
+
+        for i in 0..mem_properties.memory_type_count {
+            if type_filter & (1 << i) > 0
+                && mem_properties.memory_types[i as usize].property_flags & properties == properties
+            {
+                return Ok(i);
+            }
+        }
+
+        Err("No suitable memory type found !")?
+    }
+
+    fn create_vertex_buffer(
+        instance: &Instance,
+        physical_device: &vk::PhysicalDevice,
+        device: &Device,
+    ) -> Result<(vk::Buffer, vk::DeviceMemory), Box<dyn Error>> {
+        let buffer_info = vk::BufferCreateInfo {
+            size: (std::mem::size_of::<Vertex>() * VERTICES.len()) as u64,
+            usage: vk::BufferUsageFlags::VERTEX_BUFFER,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            ..Default::default()
+        };
+        let vertex_buffer = unsafe { device.create_buffer(&buffer_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Vertex buffer created.");
+
+        let mem_requirements = unsafe { device.get_buffer_memory_requirements(vertex_buffer) };
+        let alloc_info = vk::MemoryAllocateInfo {
+            allocation_size: mem_requirements.size,
+            memory_type_index: Self::find_memory_type(
+                instance,
+                physical_device,
+                mem_requirements.memory_type_bits,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?,
+            ..Default::default()
+        };
+        let vertex_buffer_memory = unsafe { device.allocate_memory(&alloc_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Vertex buffer memory allocated.");
+
+        unsafe { device.bind_buffer_memory(vertex_buffer, vertex_buffer_memory, 0) }?;
+
+        let data = unsafe {
+            device.map_memory(
+                vertex_buffer_memory,
+                0,
+                buffer_info.size,
+                vk::MemoryMapFlags::default(),
+            )
+        }? as *mut Vertex;
+        unsafe { data.copy_from_nonoverlapping(VERTICES.as_ptr(), VERTICES.len()) };
+        unsafe { device.unmap_memory(vertex_buffer_memory) };
+        #[cfg(debug_assertions)]
+        println!("Vertex buffer memory copied.");
+
+        Ok((vertex_buffer, vertex_buffer_memory))
     }
 
     fn create_command_pool(
@@ -450,7 +579,13 @@ impl VkRsApp {
 
         let shader_stages = [vert_shader_stage_info, frag_shader_stage_info];
 
+        let binding_description = Vertex::get_binding_description();
+        let attribute_descriptions = Vertex::get_attribute_descriptions();
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo {
+            vertex_binding_description_count: 1,
+            vertex_attribute_description_count: attribute_descriptions.len() as u32,
+            p_vertex_binding_descriptions: &binding_description,
+            p_vertex_attribute_descriptions: attribute_descriptions.as_ptr(),
             ..Default::default()
         };
 
@@ -1185,6 +1320,9 @@ impl VkRsApp {
 
         let command_pool = Self::create_command_pool(&device, &queue_family_indices)?;
 
+        let (vertex_buffer, vertex_buffer_memory) =
+            Self::create_vertex_buffer(&instance, &physical_device, &device)?;
+
         let command_buffers = Self::create_command_buffers(&device, command_pool)?;
 
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
@@ -1221,6 +1359,8 @@ impl VkRsApp {
             width,
             height,
             framebuffer_resized: false,
+            vertex_buffer,
+            vertex_buffer_memory,
         })
     }
 
@@ -1341,6 +1481,14 @@ impl VkRsApp {
 impl Drop for VkRsApp {
     fn drop(&mut self) {
         self.cleanup_swapchain();
+
+        unsafe { self.device.destroy_buffer(self.vertex_buffer, None) };
+        #[cfg(debug_assertions)]
+        println!("Vertex buffer dropped.");
+
+        unsafe { self.device.free_memory(self.vertex_buffer_memory, None) };
+        #[cfg(debug_assertions)]
+        println!("Vertex buffer memory freed.");
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             unsafe {

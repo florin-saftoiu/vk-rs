@@ -819,6 +819,7 @@ version = "0.1.0"
 dependencies = [
  "ash",
  "ash-window",
+ "memoffset",
  "num",
  "raw-window-handle 0.3.4",
  "winit",
