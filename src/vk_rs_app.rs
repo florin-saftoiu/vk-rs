@@ -385,43 +385,64 @@ impl VkRsApp {
         Err("No suitable memory type found !")?
     }
 
-    fn create_vertex_buffer(
+    fn create_buffer(
         instance: &Instance,
         physical_device: &vk::PhysicalDevice,
         device: &Device,
+        size: vk::DeviceSize,
+        usage: vk::BufferUsageFlags,
+        properties: vk::MemoryPropertyFlags,
     ) -> Result<(vk::Buffer, vk::DeviceMemory), Box<dyn Error>> {
         let buffer_info = vk::BufferCreateInfo {
-            size: (std::mem::size_of::<Vertex>() * VERTICES.len()) as u64,
-            usage: vk::BufferUsageFlags::VERTEX_BUFFER,
+            size,
+            usage,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             ..Default::default()
         };
-        let vertex_buffer = unsafe { device.create_buffer(&buffer_info, None) }?;
+        let buffer = unsafe { device.create_buffer(&buffer_info, None) }?;
         #[cfg(debug_assertions)]
-        println!("Vertex buffer created.");
+        println!("Buffer created.");
 
-        let mem_requirements = unsafe { device.get_buffer_memory_requirements(vertex_buffer) };
+        let mem_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
         let alloc_info = vk::MemoryAllocateInfo {
             allocation_size: mem_requirements.size,
             memory_type_index: Self::find_memory_type(
                 instance,
                 physical_device,
                 mem_requirements.memory_type_bits,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                properties,
             )?,
             ..Default::default()
         };
-        let vertex_buffer_memory = unsafe { device.allocate_memory(&alloc_info, None) }?;
+        let buffer_memory = unsafe { device.allocate_memory(&alloc_info, None) }?;
         #[cfg(debug_assertions)]
-        println!("Vertex buffer memory allocated.");
+        println!("Buffer memory allocated.");
 
-        unsafe { device.bind_buffer_memory(vertex_buffer, vertex_buffer_memory, 0) }?;
+        unsafe { device.bind_buffer_memory(buffer, buffer_memory, 0) }?;
+
+        Ok((buffer, buffer_memory))
+    }
+
+    fn create_vertex_buffer(
+        instance: &Instance,
+        physical_device: &vk::PhysicalDevice,
+        device: &Device,
+    ) -> Result<(vk::Buffer, vk::DeviceMemory), Box<dyn Error>> {
+        let buffer_size = (std::mem::size_of::<Vertex>() * VERTICES.len()) as u64;
+        let (vertex_buffer, vertex_buffer_memory) = Self::create_buffer(
+            instance,
+            physical_device,
+            device,
+            buffer_size,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
 
         let data = unsafe {
             device.map_memory(
                 vertex_buffer_memory,
                 0,
-                buffer_info.size,
+                buffer_size,
                 vk::MemoryMapFlags::default(),
             )
         }? as *mut Vertex;
