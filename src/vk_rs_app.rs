@@ -73,20 +73,26 @@ impl Vertex {
     }
 }
 
-const VERTICES: [Vertex; 3] = [
+const VERTICES: [Vertex; 4] = [
     Vertex {
-        pos: [0.0, -0.5],
-        color: [1.0, 1.0, 1.0],
+        pos: [-0.5, -0.5],
+        color: [1.0, 0.0, 0.0],
     },
     Vertex {
-        pos: [0.5, 0.5],
+        pos: [0.5, -0.5],
         color: [0.0, 1.0, 0.0],
     },
     Vertex {
-        pos: [-0.5, 0.5],
+        pos: [0.5, 0.5],
         color: [0.0, 0.0, 1.0],
     },
+    Vertex {
+        pos: [-0.5, 0.5],
+        color: [1.0, 1.0, 1.0],
+    },
 ];
+
+const INDICES: [u16; 6] = [0, 1, 2, 2, 3, 0];
 
 pub struct VkRsApp {
     _entry: Entry,
@@ -120,6 +126,8 @@ pub struct VkRsApp {
     framebuffer_resized: bool,
     vertex_buffer: vk::Buffer,
     vertex_buffer_memory: vk::DeviceMemory,
+    index_buffer: vk::Buffer,
+    index_buffer_memory: vk::DeviceMemory,
 }
 
 #[cfg(debug_assertions)]
@@ -332,11 +340,22 @@ impl VkRsApp {
         println!("Bind vertex buffers command added.");
 
         unsafe {
+            self.device.cmd_bind_index_buffer(
+                command_buffer,
+                self.index_buffer,
+                0,
+                vk::IndexType::UINT16,
+            )
+        }
+        #[cfg(debug_assertions)]
+        println!("Bind index buffer command added.");
+
+        unsafe {
             self.device
-                .cmd_draw(command_buffer, VERTICES.len() as u32, 1, 0, 0)
+                .cmd_draw_indexed(command_buffer, INDICES.len() as u32, 1, 0, 0, 0)
         };
         #[cfg(debug_assertions)]
-        println!("Draw command added.");
+        println!("Draw indexed command added.");
 
         unsafe { self.device.cmd_end_render_pass(command_buffer) };
         #[cfg(debug_assertions)]
@@ -544,6 +563,70 @@ impl VkRsApp {
         println!("Staging buffer memory freed.");
 
         Ok((vertex_buffer, vertex_buffer_memory))
+    }
+
+    fn create_index_buffer(
+        instance: &Instance,
+        physical_device: &vk::PhysicalDevice,
+        device: &Device,
+        command_pool: vk::CommandPool,
+        graphics_queue: vk::Queue,
+    ) -> Result<(vk::Buffer, vk::DeviceMemory), Box<dyn Error>> {
+        let buffer_size = (std::mem::size_of::<u16>() * INDICES.len()) as u64;
+        let (staging_buffer, staging_buffer_memory) = Self::create_buffer(
+            instance,
+            physical_device,
+            device,
+            buffer_size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
+        #[cfg(debug_assertions)]
+        println!("Staging buffer created.");
+
+        let data = unsafe {
+            device.map_memory(
+                staging_buffer_memory,
+                0,
+                buffer_size,
+                vk::MemoryMapFlags::default(),
+            )
+        }? as *mut u16;
+        unsafe { data.copy_from_nonoverlapping(INDICES.as_ptr(), INDICES.len()) };
+        unsafe { device.unmap_memory(staging_buffer_memory) };
+        #[cfg(debug_assertions)]
+        println!("Staging buffer memory copied.");
+
+        let (index_buffer, index_buffer_memory) = Self::create_buffer(
+            instance,
+            physical_device,
+            device,
+            buffer_size,
+            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+        #[cfg(debug_assertions)]
+        println!("Index buffer created.");
+
+        Self::copy_buffer(
+            device,
+            command_pool,
+            graphics_queue,
+            staging_buffer,
+            index_buffer,
+            buffer_size,
+        )?;
+        #[cfg(debug_assertions)]
+        println!("Staging buffer copied to index buffer.");
+
+        unsafe { device.destroy_buffer(staging_buffer, None) };
+        #[cfg(debug_assertions)]
+        println!("Staging buffer dropped.");
+        unsafe { device.free_memory(staging_buffer_memory, None) };
+        #[cfg(debug_assertions)]
+        println!("Staging buffer memory freed.");
+
+        Ok((index_buffer, index_buffer_memory))
     }
 
     fn create_command_pool(
@@ -1441,6 +1524,14 @@ impl VkRsApp {
             graphics_queue,
         )?;
 
+        let (index_buffer, index_buffer_memory) = Self::create_index_buffer(
+            &instance,
+            &physical_device,
+            &device,
+            command_pool,
+            graphics_queue,
+        )?;
+
         let command_buffers = Self::create_command_buffers(&device, command_pool)?;
 
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
@@ -1479,6 +1570,8 @@ impl VkRsApp {
             framebuffer_resized: false,
             vertex_buffer,
             vertex_buffer_memory,
+            index_buffer,
+            index_buffer_memory,
         })
     }
 
@@ -1599,6 +1692,14 @@ impl VkRsApp {
 impl Drop for VkRsApp {
     fn drop(&mut self) {
         self.cleanup_swapchain();
+
+        unsafe { self.device.destroy_buffer(self.index_buffer, None) };
+        #[cfg(debug_assertions)]
+        println!("Index buffer dropped.");
+
+        unsafe { self.device.free_memory(self.index_buffer_memory, None) };
+        #[cfg(debug_assertions)]
+        println!("Index buffer memory freed.");
 
         unsafe { self.device.destroy_buffer(self.vertex_buffer, None) };
         #[cfg(debug_assertions)]
