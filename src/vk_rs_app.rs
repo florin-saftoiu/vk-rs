@@ -423,33 +423,125 @@ impl VkRsApp {
         Ok((buffer, buffer_memory))
     }
 
+    fn copy_buffer(
+        device: &Device,
+        command_pool: vk::CommandPool,
+        graphics_queue: vk::Queue,
+        src_buffer: vk::Buffer,
+        dst_buffer: vk::Buffer,
+        size: vk::DeviceSize,
+    ) -> Result<(), Box<dyn Error>> {
+        let alloc_info = vk::CommandBufferAllocateInfo {
+            level: vk::CommandBufferLevel::PRIMARY,
+            command_pool: command_pool,
+            command_buffer_count: 1,
+            ..Default::default()
+        };
+        let command_buffer = unsafe { device.allocate_command_buffers(&alloc_info) }?[0];
+        #[cfg(debug_assertions)]
+        println!("Command buffer allocated.");
+
+        let begin_info = vk::CommandBufferBeginInfo {
+            flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+            ..Default::default()
+        };
+        unsafe { device.begin_command_buffer(command_buffer, &begin_info) }?;
+        #[cfg(debug_assertions)]
+        println!("Begin command buffer.");
+
+        let copy_region = vk::BufferCopy {
+            src_offset: 0,
+            dst_offset: 0,
+            size,
+            ..Default::default()
+        };
+        unsafe { device.cmd_copy_buffer(command_buffer, src_buffer, dst_buffer, &[copy_region]) };
+        #[cfg(debug_assertions)]
+        println!("Copy command added.");
+
+        unsafe { device.end_command_buffer(command_buffer) }?;
+        #[cfg(debug_assertions)]
+        println!("End command buffer.");
+
+        let submit_info = vk::SubmitInfo {
+            command_buffer_count: 1,
+            p_command_buffers: &command_buffer,
+            ..Default::default()
+        };
+        unsafe { device.queue_submit(graphics_queue, &[submit_info], vk::Fence::null()) }?;
+        #[cfg(debug_assertions)]
+        println!("Command buffer submitted.");
+        unsafe { device.queue_wait_idle(graphics_queue) }?;
+        #[cfg(debug_assertions)]
+        println!("Graphics queue idle.");
+
+        unsafe { device.free_command_buffers(command_pool, &[command_buffer]) };
+        #[cfg(debug_assertions)]
+        println!("Command buffer freed.");
+
+        Ok(())
+    }
+
     fn create_vertex_buffer(
         instance: &Instance,
         physical_device: &vk::PhysicalDevice,
         device: &Device,
+        command_pool: vk::CommandPool,
+        graphics_queue: vk::Queue,
     ) -> Result<(vk::Buffer, vk::DeviceMemory), Box<dyn Error>> {
         let buffer_size = (std::mem::size_of::<Vertex>() * VERTICES.len()) as u64;
-        let (vertex_buffer, vertex_buffer_memory) = Self::create_buffer(
+        let (staging_buffer, staging_buffer_memory) = Self::create_buffer(
             instance,
             physical_device,
             device,
             buffer_size,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
+            vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
+        #[cfg(debug_assertions)]
+        println!("Staging buffer created.");
 
         let data = unsafe {
             device.map_memory(
-                vertex_buffer_memory,
+                staging_buffer_memory,
                 0,
                 buffer_size,
                 vk::MemoryMapFlags::default(),
             )
         }? as *mut Vertex;
         unsafe { data.copy_from_nonoverlapping(VERTICES.as_ptr(), VERTICES.len()) };
-        unsafe { device.unmap_memory(vertex_buffer_memory) };
+        unsafe { device.unmap_memory(staging_buffer_memory) };
         #[cfg(debug_assertions)]
-        println!("Vertex buffer memory copied.");
+        println!("Staging buffer memory copied.");
+
+        let (vertex_buffer, vertex_buffer_memory) = Self::create_buffer(
+            instance,
+            physical_device,
+            device,
+            buffer_size,
+            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+        #[cfg(debug_assertions)]
+        println!("Vertex buffer created.");
+
+        Self::copy_buffer(
+            device,
+            command_pool,
+            graphics_queue,
+            staging_buffer,
+            vertex_buffer,
+            buffer_size,
+        )?;
+        #[cfg(debug_assertions)]
+        println!("Staging buffer copied to vertex buffer.");
+
+        unsafe { device.destroy_buffer(staging_buffer, None) };
+        #[cfg(debug_assertions)]
+        println!("Staging buffer dropped.");
+        unsafe { device.free_memory(staging_buffer_memory, None) };
+        #[cfg(debug_assertions)]
+        println!("Staging buffer memory freed.");
 
         Ok((vertex_buffer, vertex_buffer_memory))
     }
@@ -1341,8 +1433,13 @@ impl VkRsApp {
 
         let command_pool = Self::create_command_pool(&device, &queue_family_indices)?;
 
-        let (vertex_buffer, vertex_buffer_memory) =
-            Self::create_vertex_buffer(&instance, &physical_device, &device)?;
+        let (vertex_buffer, vertex_buffer_memory) = Self::create_vertex_buffer(
+            &instance,
+            &physical_device,
+            &device,
+            command_pool,
+            graphics_queue,
+        )?;
 
         let command_buffers = Self::create_command_buffers(&device, command_pool)?;
 
