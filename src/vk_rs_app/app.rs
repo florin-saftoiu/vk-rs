@@ -1,7 +1,7 @@
 #[cfg(debug_assertions)]
 use std::ffi::c_void;
 use std::ffi::{CStr, CString};
-use std::{error::Error, fs::File, io::Read, path::Path};
+use std::{error::Error, path::Path};
 
 #[cfg(debug_assertions)]
 use ash::extensions::ext::DebugUtils;
@@ -9,69 +9,17 @@ use ash::{
     extensions::khr::{Surface, Swapchain},
     vk, Device, Entry, Instance,
 };
-use memoffset::offset_of;
+
+use super::{
+    queue_family_indices::QueueFamilyIndices, swapchain_support_details::SwapchainSupportDetails,
+    tools::read_shader, vertex::Vertex,
+};
 
 #[cfg(debug_assertions)]
 const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
 
 const DEVICE_EXTENSIONS: [&str; 1] = ["VK_KHR_swapchain"];
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
-
-fn read_shader(path: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
-    let spv = File::open(path)?;
-    Ok(spv.bytes().filter_map(|b| b.ok()).collect::<Vec<u8>>())
-}
-
-#[derive(Default)]
-struct QueueFamilyIndices {
-    graphics_family: Option<u32>,
-    present_family: Option<u32>,
-}
-
-impl QueueFamilyIndices {
-    pub fn is_complete(&self) -> bool {
-        self.graphics_family.is_some() && self.present_family.is_some()
-    }
-}
-
-struct SwapchainSupportDetails {
-    capabilities: vk::SurfaceCapabilitiesKHR,
-    formats: Vec<vk::SurfaceFormatKHR>,
-    present_modes: Vec<vk::PresentModeKHR>,
-}
-
-#[repr(C)]
-struct Vertex {
-    pos: [f32; 2],
-    color: [f32; 3],
-}
-
-impl Vertex {
-    fn get_binding_description() -> vk::VertexInputBindingDescription {
-        vk::VertexInputBindingDescription {
-            binding: 0,
-            stride: std::mem::size_of::<Self>() as u32,
-            input_rate: vk::VertexInputRate::VERTEX,
-        }
-    }
-
-    fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 2] {
-        [
-            vk::VertexInputAttributeDescription {
-                binding: 0,
-                location: 0,
-                format: vk::Format::R32G32_SFLOAT,
-                offset: offset_of!(Self, pos) as u32,
-            },
-            vk::VertexInputAttributeDescription {
-                binding: 0,
-                location: 1,
-                format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(Self, color) as u32,
-            },
-        ]
-    }
-}
 
 const VERTICES: [Vertex; 4] = [
     Vertex {
@@ -93,6 +41,35 @@ const VERTICES: [Vertex; 4] = [
 ];
 
 const INDICES: [u16; 6] = [0, 1, 2, 2, 3, 0];
+
+#[cfg(debug_assertions)]
+unsafe extern "system" fn vk_debug_utils_callback(
+    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    _p_user_data: *mut c_void,
+) -> vk::Bool32 {
+    let msg_severity = match message_severity {
+        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "[VERBOSE]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[INFO]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[WARNING]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[ERROR]",
+        _ => "[UNKNOWN_SEVERITY]",
+    };
+
+    let msg_type = match message_type {
+        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[GENERAL]",
+        vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[PERFORMANCE]",
+        vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[VALIDATION]",
+        _ => "[UNKNOWN_TYPE]",
+    };
+
+    let msg = CStr::from_ptr((*p_callback_data).p_message);
+
+    println!("{} {} {:?}", msg_severity, msg_type, msg);
+
+    vk::FALSE
+}
 
 pub struct VkRsApp {
     _entry: Entry,
@@ -128,35 +105,6 @@ pub struct VkRsApp {
     vertex_buffer_memory: vk::DeviceMemory,
     index_buffer: vk::Buffer,
     index_buffer_memory: vk::DeviceMemory,
-}
-
-#[cfg(debug_assertions)]
-unsafe extern "system" fn vk_debug_utils_callback(
-    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
-    _p_user_data: *mut c_void,
-) -> vk::Bool32 {
-    let msg_severity = match message_severity {
-        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "[VERBOSE]",
-        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[INFO]",
-        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[WARNING]",
-        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[ERROR]",
-        _ => "[UNKNOWN_SEVERITY]",
-    };
-
-    let msg_type = match message_type {
-        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[GENERAL]",
-        vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[PERFORMANCE]",
-        vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[VALIDATION]",
-        _ => "[UNKNOWN_TYPE]",
-    };
-
-    let msg = CStr::from_ptr((*p_callback_data).p_message);
-
-    println!("{} {} {:?}", msg_severity, msg_type, msg);
-
-    vk::FALSE
 }
 
 impl VkRsApp {
