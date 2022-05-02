@@ -11,8 +11,7 @@ use ash::{
 };
 
 use super::{
-    queue_family_indices::QueueFamilyIndices, swapchain_support_details::SwapchainSupportDetails,
-    tools::read_shader, vertex::Vertex,
+    tools::read_shader, types::QueueFamilyIndices, types::SwapchainSupportDetails, types::Vertex,
 };
 
 #[cfg(debug_assertions)]
