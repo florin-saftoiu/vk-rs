@@ -11,7 +11,8 @@ use ash::{
 };
 
 use super::{
-    tools::read_shader, types::QueueFamilyIndices, types::SwapchainSupportDetails, types::Vertex,
+    tools::read_shader, types::QueueFamilyIndices, types::SwapchainSupportDetails,
+    types::UniformBufferOject, types::Vertex,
 };
 
 #[cfg(debug_assertions)]
@@ -88,6 +89,7 @@ pub struct VkRsApp {
     swapchain_extent: vk::Extent2D,
     swapchain_image_views: Vec<vk::ImageView>,
     render_pass: vk::RenderPass,
+    descriptor_set_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
     graphics_pipeline: vk::Pipeline,
     swapchain_framebuffers: Vec<vk::Framebuffer>,
@@ -104,6 +106,8 @@ pub struct VkRsApp {
     vertex_buffer_memory: vk::DeviceMemory,
     index_buffer: vk::Buffer,
     index_buffer_memory: vk::DeviceMemory,
+    uniform_buffers: Vec<vk::Buffer>,
+    uniform_buffers_memory: Vec<vk::DeviceMemory>,
 }
 
 impl VkRsApp {
@@ -140,6 +144,16 @@ impl VkRsApp {
         };
         #[cfg(debug_assertions)]
         println!("Swapchain dropped.");
+
+        for i in 0..MAX_FRAMES_IN_FLIGHT {
+            unsafe { self.device.destroy_buffer(self.uniform_buffers[i], None) };
+            unsafe {
+                self.device
+                    .free_memory(self.uniform_buffers_memory[i], None)
+            };
+        }
+        #[cfg(debug_assertions)]
+        println!("Uniform buffers dropped and uniform buffers memory freed.");
     }
 
     fn recreate_swapchain(&mut self) -> Result<(), Box<dyn Error>> {
@@ -174,8 +188,12 @@ impl VkRsApp {
 
         let render_pass = Self::create_render_pass(&self.device, swapchain_image_format)?;
 
-        let (pipeline_layout, graphics_pipeline) =
-            Self::create_graphics_pipeline(&self.device, swapchain_extent, render_pass)?;
+        let (pipeline_layout, graphics_pipeline) = Self::create_graphics_pipeline(
+            &self.device,
+            swapchain_extent,
+            render_pass,
+            self.descriptor_set_layout,
+        )?;
 
         let swapchain_framebuffers = Self::create_framebuffers(
             &self.device,
@@ -183,6 +201,9 @@ impl VkRsApp {
             swapchain_extent,
             render_pass,
         )?;
+
+        let (uniform_buffers, uniform_buffers_memory) =
+            Self::create_uniform_buffers(&self.instance, &self.physical_device, &self.device)?;
 
         self.swapchain = swapchain;
         self.swapchain_images = swapchain_images;
@@ -193,6 +214,8 @@ impl VkRsApp {
         self.pipeline_layout = pipeline_layout;
         self.graphics_pipeline = graphics_pipeline;
         self.swapchain_framebuffers = swapchain_framebuffers;
+        self.uniform_buffers = uniform_buffers;
+        self.uniform_buffers_memory = uniform_buffers_memory;
 
         Ok(())
     }
@@ -576,6 +599,34 @@ impl VkRsApp {
         Ok((index_buffer, index_buffer_memory))
     }
 
+    fn create_uniform_buffers(
+        instance: &Instance,
+        physical_device: &vk::PhysicalDevice,
+        device: &Device,
+    ) -> Result<(Vec<vk::Buffer>, Vec<vk::DeviceMemory>), Box<dyn Error>> {
+        let buffer_size = std::mem::size_of::<UniformBufferOject>() as u64;
+
+        let mut uniform_buffers = vec![];
+        let mut uniform_buffers_memory = vec![];
+        for _ in 0..MAX_FRAMES_IN_FLIGHT {
+            let (uniform_buffer, uniform_buffer_memory) = Self::create_buffer(
+                instance,
+                physical_device,
+                device,
+                buffer_size,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?;
+            uniform_buffers.push(uniform_buffer);
+            uniform_buffers_memory.push(uniform_buffer_memory);
+        }
+
+        #[cfg(debug_assertions)]
+        println!("Uniform buffers and uniform buffers memory created.");
+
+        Ok((uniform_buffers, uniform_buffers_memory))
+    }
+
     fn create_command_pool(
         device: &Device,
         device_queue_family_indices: &QueueFamilyIndices,
@@ -691,10 +742,32 @@ impl VkRsApp {
         Ok(shader_module)
     }
 
+    fn create_descriptor_set_layout(
+        device: &Device,
+    ) -> Result<vk::DescriptorSetLayout, Box<dyn Error>> {
+        let ubo_layout_bindings = [vk::DescriptorSetLayoutBinding {
+            binding: 0,
+            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::VERTEX,
+            ..Default::default()
+        }];
+        let layout_info = vk::DescriptorSetLayoutCreateInfo {
+            binding_count: 1,
+            p_bindings: ubo_layout_bindings.as_ptr(),
+            ..Default::default()
+        };
+        let descriptor_set_layout =
+            unsafe { device.create_descriptor_set_layout(&layout_info, None) }?;
+
+        Ok(descriptor_set_layout)
+    }
+
     fn create_graphics_pipeline(
         device: &Device,
         swapchain_extent: vk::Extent2D,
         render_pass: vk::RenderPass,
+        descriptor_set_layout: vk::DescriptorSetLayout,
     ) -> Result<(vk::PipelineLayout, vk::Pipeline), Box<dyn Error>> {
         let vert_shader = read_shader(Path::new("shaders/vert.spv"))?;
         let vert_shader_module = Self::create_shader_module(device, &vert_shader)?;
@@ -797,6 +870,8 @@ impl VkRsApp {
         };
 
         let pipeline_layout_info = vk::PipelineLayoutCreateInfo {
+            set_layout_count: 1,
+            p_set_layouts: &descriptor_set_layout as *const vk::DescriptorSetLayout,
             ..Default::default()
         };
 
@@ -1451,8 +1526,14 @@ impl VkRsApp {
 
         let render_pass = Self::create_render_pass(&device, swapchain_image_format)?;
 
-        let (pipeline_layout, graphics_pipeline) =
-            Self::create_graphics_pipeline(&device, swapchain_extent, render_pass)?;
+        let descriptor_set_layout = Self::create_descriptor_set_layout(&device)?;
+
+        let (pipeline_layout, graphics_pipeline) = Self::create_graphics_pipeline(
+            &device,
+            swapchain_extent,
+            render_pass,
+            descriptor_set_layout,
+        )?;
 
         let swapchain_framebuffers = Self::create_framebuffers(
             &device,
@@ -1479,6 +1560,9 @@ impl VkRsApp {
             graphics_queue,
         )?;
 
+        let (uniform_buffers, uniform_buffers_memory) =
+            Self::create_uniform_buffers(&instance, &physical_device, &device)?;
+
         let command_buffers = Self::create_command_buffers(&device, command_pool)?;
 
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
@@ -1503,6 +1587,7 @@ impl VkRsApp {
             swapchain_extent,
             swapchain_image_views,
             render_pass,
+            descriptor_set_layout,
             pipeline_layout,
             graphics_pipeline,
             swapchain_framebuffers,
@@ -1519,10 +1604,38 @@ impl VkRsApp {
             vertex_buffer_memory,
             index_buffer,
             index_buffer_memory,
+            uniform_buffers,
+            uniform_buffers_memory,
         })
     }
 
-    pub fn draw_frame(&mut self) {
+    pub fn update_uniform_buffer(&self, current_image: usize, elapsed_time: f32) {
+        let ubo = UniformBufferOject {
+            model: [1.0, 1.0, 1.0, 1.0],
+            view: [1.0, 1.0, 1.0, 1.0],
+            proj: [0.0, 0.0, 0.0, 0.0],
+        };
+
+        let data = unsafe {
+            self.device.map_memory(
+                self.uniform_buffers_memory[current_image],
+                0,
+                std::mem::size_of::<UniformBufferOject>() as u64,
+                vk::MemoryMapFlags::default(),
+            )
+        }
+        .expect("Error mapping memory to uniform buffer !")
+            as *mut UniformBufferOject;
+        unsafe { data.copy_from_nonoverlapping(&ubo as *const UniformBufferOject, 1) };
+        unsafe {
+            self.device
+                .unmap_memory(self.uniform_buffers_memory[current_image])
+        };
+        #[cfg(debug_assertions)]
+        println!("Uniform buffer memory copied.");
+    }
+
+    pub fn draw_frame(&mut self, elapsed_time: f32) {
         unsafe {
             self.device.wait_for_fences(
                 &[self.in_flight_fences[self.current_frame]],
@@ -1550,6 +1663,8 @@ impl VkRsApp {
                 _ => panic!("Error acquiring next image !"),
             },
         };
+
+        self.update_uniform_buffer(self.current_frame, elapsed_time);
 
         unsafe {
             self.device
@@ -1639,6 +1754,13 @@ impl VkRsApp {
 impl Drop for VkRsApp {
     fn drop(&mut self) {
         self.cleanup_swapchain();
+
+        unsafe {
+            self.device
+                .destroy_descriptor_set_layout(self.descriptor_set_layout, None)
+        };
+        #[cfg(debug_assertions)]
+        println!("Descriptor set layout dropped.");
 
         unsafe { self.device.destroy_buffer(self.index_buffer, None) };
         #[cfg(debug_assertions)]

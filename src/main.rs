@@ -2,7 +2,7 @@
 
 mod vk_rs_app;
 
-use std::error::Error;
+use std::{error::Error, time::Instant};
 
 use winit::{
     dpi::LogicalSize,
@@ -28,6 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.inner_size().height,
     )?;
     let mut minimized = false;
+    let mut tp1 = Instant::now();
 
     // Main Loop
     event_loop.run(move |event, _, control_flow| {
@@ -60,7 +61,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             },
             Event::MainEventsCleared => {
                 if !minimized {
-                    vk_rs_app.draw_frame();
+                    let tp2 = Instant::now();
+                    let elapsed_time = tp2.duration_since(tp1).as_secs_f32();
+                    tp1 = tp2;
+                    vk_rs_app.draw_frame(elapsed_time);
                 }
             }
             Event::LoopDestroyed => {

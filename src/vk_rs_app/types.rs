@@ -51,3 +51,10 @@ impl Vertex {
         ]
     }
 }
+
+#[repr(C)]
+pub struct UniformBufferOject {
+    pub model: [f32; 4],
+    pub view: [f32; 4],
+    pub proj: [f32; 4],
+}
