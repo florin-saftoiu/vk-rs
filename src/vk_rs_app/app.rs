@@ -9,6 +9,7 @@ use ash::{
     extensions::khr::{Surface, Swapchain},
     vk, Device, Entry, Instance,
 };
+use cgmath::{Deg, Matrix4, Point3, Vector3};
 
 use super::{
     tools::read_shader, types::QueueFamilyIndices, types::SwapchainSupportDetails,
@@ -1611,9 +1612,18 @@ impl VkRsApp {
 
     pub fn update_uniform_buffer(&self, current_image: usize, elapsed_time: f32) {
         let ubo = UniformBufferOject {
-            model: [1.0, 1.0, 1.0, 1.0],
-            view: [1.0, 1.0, 1.0, 1.0],
-            proj: [0.0, 0.0, 0.0, 0.0],
+            model: Matrix4::from_angle_z(Deg(90.0 * elapsed_time)),
+            view: Matrix4::look_at_rh(
+                Point3::new(2.0, 2.0, 2.0),
+                Point3::new(0.0, 0.0, 0.0),
+                Vector3::new(0.0, 0.0, 1.0),
+            ),
+            proj: cgmath::perspective(
+                Deg(45.0),
+                self.swapchain_extent.width as f32 / self.swapchain_extent.height as f32,
+                0.1,
+                10.0,
+            ),
         };
 
         let data = unsafe {
