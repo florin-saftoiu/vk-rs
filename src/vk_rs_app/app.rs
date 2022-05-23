@@ -1730,9 +1730,6 @@ impl VkRsApp {
                 .expect("Error recreating swapchain !");
         }
 
-        unsafe { self.device.queue_wait_idle(self.present_queue) }
-            .expect("Error waiting for presentation to finish !");
-
         self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
