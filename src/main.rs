@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.inner_size().height,
     )?;
     let mut minimized = false;
-    let mut tp1 = Instant::now();
+    let tp1 = Instant::now();
 
     // Main Loop
     event_loop.run(move |event, _, control_flow| {
@@ -62,9 +62,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             Event::MainEventsCleared => {
                 if !minimized {
                     let tp2 = Instant::now();
-                    let elapsed_time = tp2.duration_since(tp1).as_secs_f32();
-                    tp1 = tp2;
-                    vk_rs_app.draw_frame(elapsed_time);
+                    let time = tp2.duration_since(tp1).as_secs_f32();
+                    vk_rs_app.draw_frame(time);
                 }
             }
             Event::LoopDestroyed => {

@@ -109,6 +109,8 @@ pub struct VkRsApp {
     index_buffer_memory: vk::DeviceMemory,
     uniform_buffers: Vec<vk::Buffer>,
     uniform_buffers_memory: Vec<vk::DeviceMemory>,
+    descriptor_pool: vk::DescriptorPool,
+    descriptor_sets: Vec<vk::DescriptorSet>,
 }
 
 impl VkRsApp {
@@ -145,16 +147,6 @@ impl VkRsApp {
         };
         #[cfg(debug_assertions)]
         println!("Swapchain dropped.");
-
-        for i in 0..MAX_FRAMES_IN_FLIGHT {
-            unsafe { self.device.destroy_buffer(self.uniform_buffers[i], None) };
-            unsafe {
-                self.device
-                    .free_memory(self.uniform_buffers_memory[i], None)
-            };
-        }
-        #[cfg(debug_assertions)]
-        println!("Uniform buffers dropped and uniform buffers memory freed.");
     }
 
     fn recreate_swapchain(&mut self) -> Result<(), Box<dyn Error>> {
@@ -203,9 +195,6 @@ impl VkRsApp {
             render_pass,
         )?;
 
-        let (uniform_buffers, uniform_buffers_memory) =
-            Self::create_uniform_buffers(&self.instance, &self.physical_device, &self.device)?;
-
         self.swapchain = swapchain;
         self.swapchain_images = swapchain_images;
         self.swapchain_image_format = swapchain_image_format;
@@ -215,8 +204,6 @@ impl VkRsApp {
         self.pipeline_layout = pipeline_layout;
         self.graphics_pipeline = graphics_pipeline;
         self.swapchain_framebuffers = swapchain_framebuffers;
-        self.uniform_buffers = uniform_buffers;
-        self.uniform_buffers_memory = uniform_buffers_memory;
 
         Ok(())
     }
@@ -320,6 +307,19 @@ impl VkRsApp {
         }
         #[cfg(debug_assertions)]
         println!("Bind index buffer command added.");
+
+        unsafe {
+            self.device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                0,
+                &[self.descriptor_sets[self.current_frame]],
+                &[],
+            )
+        };
+        #[cfg(debug_assertions)]
+        println!("Bind descriptor sets command added.");
 
         unsafe {
             self.device
@@ -628,6 +628,63 @@ impl VkRsApp {
         Ok((uniform_buffers, uniform_buffers_memory))
     }
 
+    fn create_descriptor_pool(device: &Device) -> Result<vk::DescriptorPool, Box<dyn Error>> {
+        let pool_size = vk::DescriptorPoolSize {
+            ty: vk::DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: MAX_FRAMES_IN_FLIGHT as u32,
+            ..Default::default()
+        };
+        let pool_info = vk::DescriptorPoolCreateInfo {
+            pool_size_count: 1,
+            p_pool_sizes: &pool_size,
+            max_sets: MAX_FRAMES_IN_FLIGHT as u32,
+            ..Default::default()
+        };
+        let descriptor_pool = unsafe { device.create_descriptor_pool(&pool_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Descriptor pool created.");
+
+        Ok(descriptor_pool)
+    }
+
+    fn create_descriptor_sets(
+        device: &Device,
+        descriptor_pool: vk::DescriptorPool,
+        descriptor_set_layout: vk::DescriptorSetLayout,
+        uniform_buffers: &[vk::Buffer],
+    ) -> Result<Vec<vk::DescriptorSet>, Box<dyn Error>> {
+        let layouts = vec![descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
+        let alloc_info = vk::DescriptorSetAllocateInfo {
+            descriptor_pool,
+            descriptor_set_count: MAX_FRAMES_IN_FLIGHT as u32,
+            p_set_layouts: layouts.as_ptr(),
+            ..Default::default()
+        };
+        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&alloc_info) }?;
+        #[cfg(debug_assertions)]
+        println!("Descriptor sets created.");
+
+        for i in 0..MAX_FRAMES_IN_FLIGHT {
+            let buffer_info = vk::DescriptorBufferInfo {
+                buffer: uniform_buffers[i],
+                offset: 0,
+                range: std::mem::size_of::<UniformBufferOject>() as u64,
+            };
+            let descriptor_write = vk::WriteDescriptorSet {
+                dst_set: descriptor_sets[i],
+                dst_binding: 0,
+                dst_array_element: 0,
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: 1,
+                p_buffer_info: &buffer_info,
+                ..Default::default()
+            };
+            unsafe { device.update_descriptor_sets(&[descriptor_write], &[]) };
+        }
+
+        Ok(descriptor_sets)
+    }
+
     fn create_command_pool(
         device: &Device,
         device_queue_family_indices: &QueueFamilyIndices,
@@ -835,7 +892,7 @@ impl VkRsApp {
         let rasterizer = vk::PipelineRasterizationStateCreateInfo {
             line_width: 1f32,
             cull_mode: vk::CullModeFlags::BACK,
-            front_face: vk::FrontFace::CLOCKWISE,
+            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
             ..Default::default()
         };
 
@@ -1564,6 +1621,15 @@ impl VkRsApp {
         let (uniform_buffers, uniform_buffers_memory) =
             Self::create_uniform_buffers(&instance, &physical_device, &device)?;
 
+        let descriptor_pool = Self::create_descriptor_pool(&device)?;
+
+        let descriptor_sets = Self::create_descriptor_sets(
+            &device,
+            descriptor_pool,
+            descriptor_set_layout,
+            &uniform_buffers,
+        )?;
+
         let command_buffers = Self::create_command_buffers(&device, command_pool)?;
 
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
@@ -1607,12 +1673,14 @@ impl VkRsApp {
             index_buffer_memory,
             uniform_buffers,
             uniform_buffers_memory,
+            descriptor_pool,
+            descriptor_sets,
         })
     }
 
-    pub fn update_uniform_buffer(&self, current_image: usize, elapsed_time: f32) {
-        let ubo = UniformBufferOject {
-            model: Matrix4::from_angle_z(Deg(90.0 * elapsed_time)),
+    pub fn update_uniform_buffer(&self, current_image: usize, time: f32) {
+        let mut ubo = UniformBufferOject {
+            model: Matrix4::from_angle_z(Deg(90.0 * time)),
             view: Matrix4::look_at_rh(
                 Point3::new(2.0, 2.0, 2.0),
                 Point3::new(0.0, 0.0, 0.0),
@@ -1625,13 +1693,14 @@ impl VkRsApp {
                 10.0,
             ),
         };
+        ubo.proj[1][1] *= -1.0;
 
         let data = unsafe {
             self.device.map_memory(
                 self.uniform_buffers_memory[current_image],
                 0,
                 std::mem::size_of::<UniformBufferOject>() as u64,
-                vk::MemoryMapFlags::default(),
+                vk::MemoryMapFlags::empty(),
             )
         }
         .expect("Error mapping memory to uniform buffer !")
@@ -1645,7 +1714,7 @@ impl VkRsApp {
         println!("Uniform buffer memory copied.");
     }
 
-    pub fn draw_frame(&mut self, elapsed_time: f32) {
+    pub fn draw_frame(&mut self, time: f32) {
         unsafe {
             self.device.wait_for_fences(
                 &[self.in_flight_fences[self.current_frame]],
@@ -1674,7 +1743,7 @@ impl VkRsApp {
             },
         };
 
-        self.update_uniform_buffer(self.current_frame, elapsed_time);
+        self.update_uniform_buffer(self.current_frame, time);
 
         unsafe {
             self.device
@@ -1761,6 +1830,23 @@ impl VkRsApp {
 impl Drop for VkRsApp {
     fn drop(&mut self) {
         self.cleanup_swapchain();
+
+        for i in 0..MAX_FRAMES_IN_FLIGHT {
+            unsafe { self.device.destroy_buffer(self.uniform_buffers[i], None) };
+            unsafe {
+                self.device
+                    .free_memory(self.uniform_buffers_memory[i], None)
+            };
+        }
+        #[cfg(debug_assertions)]
+        println!("Uniform buffers dropped and uniform buffers memory freed.");
+
+        unsafe {
+            self.device
+                .destroy_descriptor_pool(self.descriptor_pool, None)
+        };
+        #[cfg(debug_assertions)]
+        println!("Descriptor pool dropped.");
 
         unsafe {
             self.device
