@@ -53,9 +53,12 @@ impl Vertex {
     }
 }
 
+#[repr(align(16))]
+pub struct Align16<T>(pub T);
+
 #[repr(C)]
 pub struct UniformBufferObject {
-    pub model: Matrix4<f32>,
-    pub view: Matrix4<f32>,
-    pub proj: Matrix4<f32>,
+    pub model: Align16<Matrix4<f32>>,
+    pub view: Align16<Matrix4<f32>>,
+    pub proj: Align16<Matrix4<f32>>,
 }

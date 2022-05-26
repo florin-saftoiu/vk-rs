@@ -11,6 +11,8 @@ use ash::{
 };
 use cgmath::{Deg, Matrix4, Point3, Vector3};
 
+use crate::vk_rs_app::types::Align16;
+
 use super::{
     tools::read_shader, types::QueueFamilyIndices, types::SwapchainSupportDetails,
     types::UniformBufferObject, types::Vertex,
@@ -1680,20 +1682,20 @@ impl VkRsApp {
 
     pub fn update_uniform_buffer(&self, current_image: usize, time: f32) {
         let mut ubo = UniformBufferObject {
-            model: Matrix4::from_angle_z(Deg(90.0 * time)),
-            view: Matrix4::look_at_rh(
+            model: Align16(Matrix4::from_angle_z(Deg(90.0 * time))),
+            view: Align16(Matrix4::look_at_rh(
                 Point3::new(2.0, 2.0, 2.0),
                 Point3::new(0.0, 0.0, 0.0),
                 Vector3::new(0.0, 0.0, 1.0),
-            ),
-            proj: cgmath::perspective(
+            )),
+            proj: Align16(cgmath::perspective(
                 Deg(45.0),
                 self.swapchain_extent.width as f32 / self.swapchain_extent.height as f32,
                 0.1,
                 10.0,
-            ),
+            )),
         };
-        ubo.proj[1][1] *= -1.0;
+        ubo.proj.0[1][1] *= -1.0;
 
         let data = unsafe {
             self.device.map_memory(
