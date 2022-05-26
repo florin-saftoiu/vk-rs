@@ -54,7 +54,7 @@ impl Vertex {
 }
 
 #[repr(C)]
-pub struct UniformBufferOject {
+pub struct UniformBufferObject {
     pub model: Matrix4<f32>,
     pub view: Matrix4<f32>,
     pub proj: Matrix4<f32>,

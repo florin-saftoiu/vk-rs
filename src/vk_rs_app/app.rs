@@ -13,7 +13,7 @@ use cgmath::{Deg, Matrix4, Point3, Vector3};
 
 use super::{
     tools::read_shader, types::QueueFamilyIndices, types::SwapchainSupportDetails,
-    types::UniformBufferOject, types::Vertex,
+    types::UniformBufferObject, types::Vertex,
 };
 
 #[cfg(debug_assertions)]
@@ -605,7 +605,7 @@ impl VkRsApp {
         physical_device: &vk::PhysicalDevice,
         device: &Device,
     ) -> Result<(Vec<vk::Buffer>, Vec<vk::DeviceMemory>), Box<dyn Error>> {
-        let buffer_size = std::mem::size_of::<UniformBufferOject>() as u64;
+        let buffer_size = std::mem::size_of::<UniformBufferObject>() as u64;
 
         let mut uniform_buffers = vec![];
         let mut uniform_buffers_memory = vec![];
@@ -668,7 +668,7 @@ impl VkRsApp {
             let buffer_info = vk::DescriptorBufferInfo {
                 buffer: uniform_buffers[i],
                 offset: 0,
-                range: std::mem::size_of::<UniformBufferOject>() as u64,
+                range: std::mem::size_of::<UniformBufferObject>() as u64,
             };
             let descriptor_write = vk::WriteDescriptorSet {
                 dst_set: descriptor_sets[i],
@@ -1679,7 +1679,7 @@ impl VkRsApp {
     }
 
     pub fn update_uniform_buffer(&self, current_image: usize, time: f32) {
-        let mut ubo = UniformBufferOject {
+        let mut ubo = UniformBufferObject {
             model: Matrix4::from_angle_z(Deg(90.0 * time)),
             view: Matrix4::look_at_rh(
                 Point3::new(2.0, 2.0, 2.0),
@@ -1699,13 +1699,13 @@ impl VkRsApp {
             self.device.map_memory(
                 self.uniform_buffers_memory[current_image],
                 0,
-                std::mem::size_of::<UniformBufferOject>() as u64,
+                std::mem::size_of::<UniformBufferObject>() as u64,
                 vk::MemoryMapFlags::empty(),
             )
         }
         .expect("Error mapping memory to uniform buffer !")
-            as *mut UniformBufferOject;
-        unsafe { data.copy_from_nonoverlapping(&ubo as *const UniformBufferOject, 1) };
+            as *mut UniformBufferObject;
+        unsafe { data.copy_from_nonoverlapping(&ubo as *const UniformBufferObject, 1) };
         unsafe {
             self.device
                 .unmap_memory(self.uniform_buffers_memory[current_image])
