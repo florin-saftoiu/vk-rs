@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 use ash::vk;
 use cgmath::Matrix4;
 use memoffset::offset_of;
@@ -55,6 +57,20 @@ impl Vertex {
 
 #[repr(align(16))]
 pub struct Align16<T>(pub T);
+
+impl<T> Deref for Align16<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for Align16<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 #[repr(C)]
 pub struct UniformBufferObject {

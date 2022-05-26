@@ -1695,7 +1695,7 @@ impl VkRsApp {
                 10.0,
             )),
         };
-        ubo.proj.0[1][1] *= -1.0;
+        ubo.proj[1][1] *= -1.0;
 
         let data = unsafe {
             self.device.map_memory(
