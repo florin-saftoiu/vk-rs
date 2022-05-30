@@ -705,6 +705,13 @@ impl VkRsApp {
         Ok(command_pool)
     }
 
+    fn create_texture_image() -> Result<(), Box<dyn Error>> {
+        let image = image::open(Path::new("textures/texture.jpg"))?;
+        let _image_size = (image.width() * image.height() * 4) as vk::DeviceSize;
+        let _pixels = image.to_rgba8().into_raw();
+        Ok(())
+    }
+
     fn create_framebuffers(
         device: &Device,
         swapchain_image_views: &[vk::ImageView],
@@ -1603,6 +1610,8 @@ impl VkRsApp {
         )?;
 
         let command_pool = Self::create_command_pool(&device, &queue_family_indices)?;
+
+        Self::create_texture_image()?;
 
         let (vertex_buffer, vertex_buffer_memory) = Self::create_vertex_buffer(
             &instance,
