@@ -113,6 +113,8 @@ pub struct VkRsApp {
     uniform_buffers_memory: Vec<vk::DeviceMemory>,
     descriptor_pool: vk::DescriptorPool,
     descriptor_sets: Vec<vk::DescriptorSet>,
+    texture_image: vk::Image,
+    texture_image_memory: vk::DeviceMemory,
 }
 
 impl VkRsApp {
@@ -423,23 +425,7 @@ impl VkRsApp {
         dst_buffer: vk::Buffer,
         size: vk::DeviceSize,
     ) -> Result<(), Box<dyn Error>> {
-        let alloc_info = vk::CommandBufferAllocateInfo {
-            level: vk::CommandBufferLevel::PRIMARY,
-            command_pool: command_pool,
-            command_buffer_count: 1,
-            ..Default::default()
-        };
-        let command_buffer = unsafe { device.allocate_command_buffers(&alloc_info) }?[0];
-        #[cfg(debug_assertions)]
-        println!("Command buffer allocated.");
-
-        let begin_info = vk::CommandBufferBeginInfo {
-            flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
-            ..Default::default()
-        };
-        unsafe { device.begin_command_buffer(command_buffer, &begin_info) }?;
-        #[cfg(debug_assertions)]
-        println!("Begin command buffer.");
+        let command_buffer = Self::begin_single_time_commands(device, command_pool)?;
 
         let copy_region = vk::BufferCopy {
             src_offset: 0,
@@ -451,25 +437,7 @@ impl VkRsApp {
         #[cfg(debug_assertions)]
         println!("Copy command added.");
 
-        unsafe { device.end_command_buffer(command_buffer) }?;
-        #[cfg(debug_assertions)]
-        println!("End command buffer.");
-
-        let submit_info = vk::SubmitInfo {
-            command_buffer_count: 1,
-            p_command_buffers: &command_buffer,
-            ..Default::default()
-        };
-        unsafe { device.queue_submit(graphics_queue, &[submit_info], vk::Fence::null()) }?;
-        #[cfg(debug_assertions)]
-        println!("Command buffer submitted.");
-        unsafe { device.queue_wait_idle(graphics_queue) }?;
-        #[cfg(debug_assertions)]
-        println!("Graphics queue idle.");
-
-        unsafe { device.free_command_buffers(command_pool, &[command_buffer]) };
-        #[cfg(debug_assertions)]
-        println!("Command buffer freed.");
+        Self::end_single_time_commands(device, command_buffer, command_pool, graphics_queue)?;
 
         Ok(())
     }
@@ -491,7 +459,7 @@ impl VkRsApp {
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
         #[cfg(debug_assertions)]
-        println!("Staging buffer created.");
+        println!("Vertex staging buffer created.");
 
         let data = unsafe {
             device.map_memory(
@@ -504,7 +472,7 @@ impl VkRsApp {
         unsafe { data.copy_from_nonoverlapping(VERTICES.as_ptr(), VERTICES.len()) };
         unsafe { device.unmap_memory(staging_buffer_memory) };
         #[cfg(debug_assertions)]
-        println!("Staging buffer memory copied.");
+        println!("Vertex staging buffer memory copied.");
 
         let (vertex_buffer, vertex_buffer_memory) = Self::create_buffer(
             instance,
@@ -526,14 +494,14 @@ impl VkRsApp {
             buffer_size,
         )?;
         #[cfg(debug_assertions)]
-        println!("Staging buffer copied to vertex buffer.");
+        println!("Vertex staging buffer copied to vertex buffer.");
 
         unsafe { device.destroy_buffer(staging_buffer, None) };
         #[cfg(debug_assertions)]
-        println!("Staging buffer dropped.");
+        println!("Vertex staging buffer dropped.");
         unsafe { device.free_memory(staging_buffer_memory, None) };
         #[cfg(debug_assertions)]
-        println!("Staging buffer memory freed.");
+        println!("Vertex staging buffer memory freed.");
 
         Ok((vertex_buffer, vertex_buffer_memory))
     }
@@ -555,7 +523,7 @@ impl VkRsApp {
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
         #[cfg(debug_assertions)]
-        println!("Staging buffer created.");
+        println!("Index staging buffer created.");
 
         let data = unsafe {
             device.map_memory(
@@ -568,7 +536,7 @@ impl VkRsApp {
         unsafe { data.copy_from_nonoverlapping(INDICES.as_ptr(), INDICES.len()) };
         unsafe { device.unmap_memory(staging_buffer_memory) };
         #[cfg(debug_assertions)]
-        println!("Staging buffer memory copied.");
+        println!("Index staging buffer memory copied.");
 
         let (index_buffer, index_buffer_memory) = Self::create_buffer(
             instance,
@@ -590,14 +558,14 @@ impl VkRsApp {
             buffer_size,
         )?;
         #[cfg(debug_assertions)]
-        println!("Staging buffer copied to index buffer.");
+        println!("Index staging buffer copied to index buffer.");
 
         unsafe { device.destroy_buffer(staging_buffer, None) };
         #[cfg(debug_assertions)]
-        println!("Staging buffer dropped.");
+        println!("Index staging buffer dropped.");
         unsafe { device.free_memory(staging_buffer_memory, None) };
         #[cfg(debug_assertions)]
-        println!("Staging buffer memory freed.");
+        println!("Index staging buffer memory freed.");
 
         Ok((index_buffer, index_buffer_memory))
     }
@@ -705,11 +673,312 @@ impl VkRsApp {
         Ok(command_pool)
     }
 
-    fn create_texture_image() -> Result<(), Box<dyn Error>> {
-        let image = image::open(Path::new("textures/texture.jpg"))?;
-        let _image_size = (image.width() * image.height() * 4) as vk::DeviceSize;
-        let _pixels = image.to_rgba8().into_raw();
+    fn begin_single_time_commands(
+        device: &Device,
+        command_pool: vk::CommandPool,
+    ) -> Result<vk::CommandBuffer, Box<dyn Error>> {
+        let alloc_info = vk::CommandBufferAllocateInfo {
+            level: vk::CommandBufferLevel::PRIMARY,
+            command_pool: command_pool,
+            command_buffer_count: 1,
+            ..Default::default()
+        };
+        let command_buffer = unsafe { device.allocate_command_buffers(&alloc_info) }?[0];
+        #[cfg(debug_assertions)]
+        println!("Single time command buffer allocated.");
+
+        let begin_info = vk::CommandBufferBeginInfo {
+            flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+            ..Default::default()
+        };
+        unsafe { device.begin_command_buffer(command_buffer, &begin_info) }?;
+        #[cfg(debug_assertions)]
+        println!("Begin single time command buffer.");
+
+        Ok(command_buffer)
+    }
+
+    fn end_single_time_commands(
+        device: &Device,
+        command_buffer: vk::CommandBuffer,
+        command_pool: vk::CommandPool,
+        graphics_queue: vk::Queue,
+    ) -> Result<(), Box<dyn Error>> {
+        unsafe { device.end_command_buffer(command_buffer) }?;
+        #[cfg(debug_assertions)]
+        println!("End single time command buffer.");
+
+        let submit_info = vk::SubmitInfo {
+            command_buffer_count: 1,
+            p_command_buffers: &command_buffer,
+            ..Default::default()
+        };
+        unsafe { device.queue_submit(graphics_queue, &[submit_info], vk::Fence::null()) }?;
+        #[cfg(debug_assertions)]
+        println!("Single time command buffer submitted.");
+        unsafe { device.queue_wait_idle(graphics_queue) }?;
+        #[cfg(debug_assertions)]
+        println!("Graphics queue idle.");
+
+        unsafe { device.free_command_buffers(command_pool, &[command_buffer]) };
+        #[cfg(debug_assertions)]
+        println!("Single time command buffer freed.");
+
         Ok(())
+    }
+
+    fn create_image(
+        instance: &Instance,
+        physical_device: &vk::PhysicalDevice,
+        device: &Device,
+        width: u32,
+        height: u32,
+        format: vk::Format,
+        tiling: vk::ImageTiling,
+        usage: vk::ImageUsageFlags,
+        properties: vk::MemoryPropertyFlags,
+    ) -> Result<(vk::Image, vk::DeviceMemory), Box<dyn Error>> {
+        let image_info = vk::ImageCreateInfo {
+            image_type: vk::ImageType::TYPE_2D,
+            extent: vk::Extent3D {
+                width: width,
+                height: height,
+                depth: 1,
+            },
+            mip_levels: 1,
+            array_layers: 1,
+            format: format,
+            tiling: tiling,
+            initial_layout: vk::ImageLayout::UNDEFINED,
+            usage: usage,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            samples: vk::SampleCountFlags::TYPE_1,
+            ..Default::default()
+        };
+        let image = unsafe { device.create_image(&image_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Image created.");
+
+        let mem_requirements = unsafe { device.get_image_memory_requirements(image) };
+        let alloc_info = vk::MemoryAllocateInfo {
+            allocation_size: mem_requirements.size,
+            memory_type_index: Self::find_memory_type(
+                instance,
+                physical_device,
+                mem_requirements.memory_type_bits,
+                properties,
+            )?,
+            ..Default::default()
+        };
+        let image_memory = unsafe { device.allocate_memory(&alloc_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Image memory allocated.");
+
+        unsafe { device.bind_image_memory(image, image_memory, 0) }?;
+
+        Ok((image, image_memory))
+    }
+
+    fn copy_buffer_to_image(
+        device: &Device,
+        graphics_queue: vk::Queue,
+        command_pool: vk::CommandPool,
+        buffer: vk::Buffer,
+        image: vk::Image,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn Error>> {
+        let command_buffer = Self::begin_single_time_commands(device, command_pool)?;
+
+        let region = vk::BufferImageCopy {
+            buffer_offset: 0,
+            buffer_row_length: 0,
+            buffer_image_height: 0,
+            image_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+                ..Default::default()
+            },
+            image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+            image_extent: vk::Extent3D {
+                width,
+                height,
+                depth: 1,
+            },
+            ..Default::default()
+        };
+
+        unsafe {
+            device.cmd_copy_buffer_to_image(
+                command_buffer,
+                buffer,
+                image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[region],
+            )
+        };
+
+        Self::end_single_time_commands(device, command_buffer, command_pool, graphics_queue)?;
+
+        Ok(())
+    }
+
+    fn transition_image_layout(
+        device: &Device,
+        graphics_queue: vk::Queue,
+        command_pool: vk::CommandPool,
+        image: vk::Image,
+        _format: vk::Format,
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+    ) -> Result<(), Box<dyn Error>> {
+        let command_buffer = Self::begin_single_time_commands(device, command_pool)?;
+
+        let src_access_mask;
+        let dst_access_mask;
+        let source_stage;
+        let destination_stage;
+        if old_layout == vk::ImageLayout::UNDEFINED
+            && new_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
+        {
+            src_access_mask = vk::AccessFlags::empty();
+            dst_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+            source_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
+            destination_stage = vk::PipelineStageFlags::TRANSFER;
+        } else if old_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
+            && new_layout == vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
+        {
+            src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+            dst_access_mask = vk::AccessFlags::SHADER_READ;
+            source_stage = vk::PipelineStageFlags::TRANSFER;
+            destination_stage = vk::PipelineStageFlags::FRAGMENT_SHADER;
+        } else {
+            return Err("Unsupported layout transition !")?;
+        }
+
+        let barrier = vk::ImageMemoryBarrier {
+            old_layout,
+            new_layout,
+            src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            image,
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+                ..Default::default()
+            },
+            src_access_mask: src_access_mask,
+            dst_access_mask: dst_access_mask,
+            ..Default::default()
+        };
+
+        unsafe {
+            device.cmd_pipeline_barrier(
+                command_buffer,
+                source_stage,
+                destination_stage,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier],
+            )
+        };
+
+        Self::end_single_time_commands(device, command_buffer, command_pool, graphics_queue)?;
+
+        Ok(())
+    }
+
+    fn create_texture_image(
+        instance: &Instance,
+        physical_device: &vk::PhysicalDevice,
+        device: &Device,
+        graphics_queue: vk::Queue,
+        command_pool: vk::CommandPool,
+    ) -> Result<(vk::Image, vk::DeviceMemory), Box<dyn Error>> {
+        let image = image::open(Path::new("textures/texture.jpg"))?;
+        let image_size = (image.width() * image.height() * 4) as vk::DeviceSize;
+        let pixels = image.to_rgba8().into_raw();
+
+        let (staging_buffer, staging_buffer_memory) = Self::create_buffer(
+            instance,
+            physical_device,
+            device,
+            image_size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
+        #[cfg(debug_assertions)]
+        println!("Texture staging buffer created.");
+
+        let data = unsafe {
+            device.map_memory(
+                staging_buffer_memory,
+                0,
+                image_size,
+                vk::MemoryMapFlags::default(),
+            )
+        }? as *mut u8;
+        unsafe { data.copy_from_nonoverlapping(pixels.as_ptr(), pixels.len()) };
+        unsafe { device.unmap_memory(staging_buffer_memory) };
+        #[cfg(debug_assertions)]
+        println!("Texture staging buffer memory copied.");
+
+        let (texture_image, texture_image_memory) = Self::create_image(
+            instance,
+            physical_device,
+            device,
+            image.width(),
+            image.height(),
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+        #[cfg(debug_assertions)]
+        println!("Texture image created.");
+
+        Self::transition_image_layout(
+            device,
+            graphics_queue,
+            command_pool,
+            texture_image,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        )?;
+        Self::copy_buffer_to_image(
+            device,
+            graphics_queue,
+            command_pool,
+            staging_buffer,
+            texture_image,
+            image.width(),
+            image.height(),
+        )?;
+        Self::transition_image_layout(
+            device,
+            graphics_queue,
+            command_pool,
+            texture_image,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        )?;
+
+        unsafe { device.destroy_buffer(staging_buffer, None) };
+        #[cfg(debug_assertions)]
+        println!("Texture staging buffer dropped.");
+        unsafe { device.free_memory(staging_buffer_memory, None) };
+        #[cfg(debug_assertions)]
+        println!("Texture staging buffer memory freed.");
+
+        Ok((texture_image, texture_image_memory))
     }
 
     fn create_framebuffers(
@@ -1611,7 +1880,13 @@ impl VkRsApp {
 
         let command_pool = Self::create_command_pool(&device, &queue_family_indices)?;
 
-        Self::create_texture_image()?;
+        let (texture_image, texture_image_memory) = Self::create_texture_image(
+            &instance,
+            &physical_device,
+            &device,
+            graphics_queue,
+            command_pool,
+        )?;
 
         let (vertex_buffer, vertex_buffer_memory) = Self::create_vertex_buffer(
             &instance,
@@ -1686,6 +1961,8 @@ impl VkRsApp {
             uniform_buffers_memory,
             descriptor_pool,
             descriptor_sets,
+            texture_image,
+            texture_image_memory,
         })
     }
 
@@ -1841,6 +2118,14 @@ impl VkRsApp {
 impl Drop for VkRsApp {
     fn drop(&mut self) {
         self.cleanup_swapchain();
+
+        unsafe { self.device.destroy_image(self.texture_image, None) };
+        #[cfg(debug_assertions)]
+        println!("Texture image dropped.");
+
+        unsafe { self.device.free_memory(self.texture_image_memory, None) };
+        #[cfg(debug_assertions)]
+        println!("Texture image memory freed.");
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             unsafe { self.device.destroy_buffer(self.uniform_buffers[i], None) };
