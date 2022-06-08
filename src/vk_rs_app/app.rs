@@ -115,6 +115,8 @@ pub struct VkRsApp {
     descriptor_sets: Vec<vk::DescriptorSet>,
     texture_image: vk::Image,
     texture_image_memory: vk::DeviceMemory,
+    texture_image_view: vk::ImageView,
+    texture_sampler: vk::Sampler,
 }
 
 impl VkRsApp {
@@ -981,6 +983,74 @@ impl VkRsApp {
         Ok((texture_image, texture_image_memory))
     }
 
+    fn create_image_view(
+        device: &Device,
+        image: vk::Image,
+        format: vk::Format,
+    ) -> Result<vk::ImageView, Box<dyn Error>> {
+        let view_info = vk::ImageViewCreateInfo {
+            image,
+            view_type: vk::ImageViewType::TYPE_2D,
+            format: format,
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let image_view = unsafe { device.create_image_view(&view_info, None) }?;
+
+        Ok(image_view)
+    }
+
+    fn create_texture_image_view(
+        device: &Device,
+        texture_image: vk::Image,
+    ) -> Result<vk::ImageView, Box<dyn Error>> {
+        let image_view = Self::create_image_view(device, texture_image, vk::Format::R8G8B8A8_SRGB)?;
+        #[cfg(debug_assertions)]
+        println!("Texture image view created.");
+
+        Ok(image_view)
+    }
+
+    fn create_texture_sampler(
+        instance: &Instance,
+        physical_device: vk::PhysicalDevice,
+        device: &Device,
+    ) -> Result<vk::Sampler, Box<dyn Error>> {
+        let properties = unsafe { instance.get_physical_device_properties(physical_device) };
+        let sampler_info = vk::SamplerCreateInfo {
+            mag_filter: vk::Filter::LINEAR,
+            min_filter: vk::Filter::LINEAR,
+            address_mode_u: vk::SamplerAddressMode::REPEAT,
+            address_mode_v: vk::SamplerAddressMode::REPEAT,
+            address_mode_w: vk::SamplerAddressMode::REPEAT,
+            anisotropy_enable: vk::TRUE,
+            max_anisotropy: properties.limits.max_sampler_anisotropy,
+            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+            unnormalized_coordinates: vk::FALSE,
+            compare_enable: vk::FALSE,
+            compare_op: vk::CompareOp::ALWAYS,
+            mipmap_mode: vk::SamplerMipmapMode::LINEAR,
+            mip_lod_bias: 0.0,
+            min_lod: 0.0,
+            max_lod: 0.0,
+            ..Default::default()
+        };
+
+        let texture_sampler = unsafe { device.create_sampler(&sampler_info, None) }?;
+        #[cfg(debug_assertions)]
+        println!("Texture sampler created.");
+
+        Ok(texture_sampler)
+    }
+
     fn create_framebuffers(
         device: &Device,
         swapchain_image_views: &[vk::ImageView],
@@ -1405,34 +1475,14 @@ impl VkRsApp {
         let swapchain_image_views = swapchain_images
             .iter()
             .map(|image| {
-                let image_view_create_info = vk::ImageViewCreateInfo {
-                    image: *image,
-                    view_type: vk::ImageViewType::TYPE_2D,
-                    format: swapchain_image_format,
-                    components: vk::ComponentMapping {
-                        r: vk::ComponentSwizzle::IDENTITY,
-                        g: vk::ComponentSwizzle::IDENTITY,
-                        b: vk::ComponentSwizzle::IDENTITY,
-                        a: vk::ComponentSwizzle::IDENTITY,
-                    },
-                    subresource_range: vk::ImageSubresourceRange {
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    },
-                    ..Default::default()
-                };
-                let image_view = unsafe { device.create_image_view(&image_view_create_info, None) }
-                    .expect("Error creating swapchain image view !");
-                image_view
+                let image_view = Self::create_image_view(device, *image, swapchain_image_format)?;
+                Ok(image_view)
             })
             .collect();
         #[cfg(debug_assertions)]
         println!("Swapchain image views created.");
 
-        Ok(swapchain_image_views)
+        swapchain_image_views
     }
 
     fn find_queue_families(
@@ -1506,6 +1556,7 @@ impl VkRsApp {
                     physical_device,
                     &DEVICE_EXTENSIONS,
                 )?
+                && device_features.sampler_anisotropy == vk::TRUE
             {
                 let swapchain_support_details =
                     Self::query_swapchain_support(physical_device, surface_loader, surface)?;
@@ -1552,6 +1603,7 @@ impl VkRsApp {
             ..Default::default()
         };
         let device_features = vk::PhysicalDeviceFeatures {
+            sampler_anisotropy: vk::TRUE,
             ..Default::default()
         };
 
@@ -1888,6 +1940,10 @@ impl VkRsApp {
             command_pool,
         )?;
 
+        let texture_image_view = Self::create_texture_image_view(&device, texture_image)?;
+
+        let texture_sampler = Self::create_texture_sampler(&&instance, physical_device, &device)?;
+
         let (vertex_buffer, vertex_buffer_memory) = Self::create_vertex_buffer(
             &instance,
             &physical_device,
@@ -1963,6 +2019,8 @@ impl VkRsApp {
             descriptor_sets,
             texture_image,
             texture_image_memory,
+            texture_image_view,
+            texture_sampler,
         })
     }
 
@@ -2118,6 +2176,17 @@ impl VkRsApp {
 impl Drop for VkRsApp {
     fn drop(&mut self) {
         self.cleanup_swapchain();
+
+        unsafe { self.device.destroy_sampler(self.texture_sampler, None) };
+        #[cfg(debug_assertions)]
+        println!("Texture sampler dropped.");
+
+        unsafe {
+            self.device
+                .destroy_image_view(self.texture_image_view, None)
+        };
+        #[cfg(debug_assertions)]
+        println!("Texture image view dropped.");
 
         unsafe { self.device.destroy_image(self.texture_image, None) };
         #[cfg(debug_assertions)]
