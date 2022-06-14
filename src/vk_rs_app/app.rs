@@ -28,18 +28,22 @@ const VERTICES: [Vertex; 4] = [
     Vertex {
         pos: [-0.5, -0.5],
         color: [1.0, 0.0, 0.0],
+        tex_coord: [1.0, 0.0],
     },
     Vertex {
         pos: [0.5, -0.5],
         color: [0.0, 1.0, 0.0],
+        tex_coord: [0.0, 0.0],
     },
     Vertex {
         pos: [0.5, 0.5],
         color: [0.0, 0.0, 1.0],
+        tex_coord: [0.0, 1.0],
     },
     Vertex {
         pos: [-0.5, 0.5],
         color: [1.0, 1.0, 1.0],
+        tex_coord: [1.0, 1.0],
     },
 ];
 
@@ -601,14 +605,21 @@ impl VkRsApp {
     }
 
     fn create_descriptor_pool(device: &Device) -> Result<vk::DescriptorPool, Box<dyn Error>> {
-        let pool_size = vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: MAX_FRAMES_IN_FLIGHT as u32,
-            ..Default::default()
-        };
+        let pool_sizes = [
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: MAX_FRAMES_IN_FLIGHT as u32,
+                ..Default::default()
+            },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                descriptor_count: MAX_FRAMES_IN_FLIGHT as u32,
+                ..Default::default()
+            },
+        ];
         let pool_info = vk::DescriptorPoolCreateInfo {
-            pool_size_count: 1,
-            p_pool_sizes: &pool_size,
+            pool_size_count: pool_sizes.len() as u32,
+            p_pool_sizes: pool_sizes.as_ptr(),
             max_sets: MAX_FRAMES_IN_FLIGHT as u32,
             ..Default::default()
         };
@@ -624,6 +635,8 @@ impl VkRsApp {
         descriptor_pool: vk::DescriptorPool,
         descriptor_set_layout: vk::DescriptorSetLayout,
         uniform_buffers: &[vk::Buffer],
+        texture_image_view: vk::ImageView,
+        texture_sampler: vk::Sampler,
     ) -> Result<Vec<vk::DescriptorSet>, Box<dyn Error>> {
         let layouts = vec![descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
         let alloc_info = vk::DescriptorSetAllocateInfo {
@@ -642,16 +655,32 @@ impl VkRsApp {
                 offset: 0,
                 range: std::mem::size_of::<UniformBufferObject>() as u64,
             };
-            let descriptor_write = vk::WriteDescriptorSet {
-                dst_set: descriptor_sets[i],
-                dst_binding: 0,
-                dst_array_element: 0,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: 1,
-                p_buffer_info: &buffer_info,
-                ..Default::default()
+            let image_info = vk::DescriptorImageInfo {
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                image_view: texture_image_view,
+                sampler: texture_sampler,
             };
-            unsafe { device.update_descriptor_sets(&[descriptor_write], &[]) };
+            let descriptor_writes = [
+                vk::WriteDescriptorSet {
+                    dst_set: descriptor_sets[i],
+                    dst_binding: 0,
+                    dst_array_element: 0,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    descriptor_count: 1,
+                    p_buffer_info: &buffer_info,
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_set: descriptor_sets[i],
+                    dst_binding: 1,
+                    dst_array_element: 0,
+                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    descriptor_count: 1,
+                    p_image_info: &image_info,
+                    ..Default::default()
+                },
+            ];
+            unsafe { device.update_descriptor_sets(&descriptor_writes, &[]) };
         }
 
         Ok(descriptor_sets)
@@ -1151,16 +1180,25 @@ impl VkRsApp {
     fn create_descriptor_set_layout(
         device: &Device,
     ) -> Result<vk::DescriptorSetLayout, Box<dyn Error>> {
-        let ubo_layout_bindings = [vk::DescriptorSetLayoutBinding {
-            binding: 0,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::VERTEX,
-            ..Default::default()
-        }];
+        let bindings = [
+            vk::DescriptorSetLayoutBinding {
+                binding: 0,
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: 1,
+                stage_flags: vk::ShaderStageFlags::VERTEX,
+                ..Default::default()
+            },
+            vk::DescriptorSetLayoutBinding {
+                binding: 1,
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                descriptor_count: 1,
+                stage_flags: vk::ShaderStageFlags::FRAGMENT,
+                ..Default::default()
+            },
+        ];
         let layout_info = vk::DescriptorSetLayoutCreateInfo {
-            binding_count: 1,
-            p_bindings: ubo_layout_bindings.as_ptr(),
+            binding_count: bindings.len() as u32,
+            p_bindings: bindings.as_ptr(),
             ..Default::default()
         };
         let descriptor_set_layout =
@@ -1970,6 +2008,8 @@ impl VkRsApp {
             descriptor_pool,
             descriptor_set_layout,
             &uniform_buffers,
+            texture_image_view,
+            texture_sampler,
         )?;
 
         let command_buffers = Self::create_command_buffers(&device, command_pool)?;
