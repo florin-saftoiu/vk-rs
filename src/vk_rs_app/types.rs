@@ -24,7 +24,7 @@ pub struct SwapchainSupportDetails {
 
 #[repr(C)]
 pub struct Vertex {
-    pub pos: [f32; 2],
+    pub pos: [f32; 3],
     pub color: [f32; 3],
     pub tex_coord: [f32; 2],
 }
@@ -43,7 +43,7 @@ impl Vertex {
             vk::VertexInputAttributeDescription {
                 binding: 0,
                 location: 0,
-                format: vk::Format::R32G32_SFLOAT,
+                format: vk::Format::R32G32B32_SFLOAT,
                 offset: offset_of!(Self, pos) as u32,
             },
             vk::VertexInputAttributeDescription {
