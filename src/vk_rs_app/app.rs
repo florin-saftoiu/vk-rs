@@ -10,6 +10,7 @@ use ash::{
     vk, Device, Entry, Instance,
 };
 use cgmath::{Deg, Matrix4, Point3, Vector3};
+use tobj::LoadOptions;
 
 use crate::vk_rs_app::types::Align16;
 
@@ -23,51 +24,6 @@ const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
 
 const DEVICE_EXTENSIONS: [&str; 1] = ["VK_KHR_swapchain"];
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
-
-const VERTICES: [Vertex; 8] = [
-    Vertex {
-        pos: [-0.5, -0.5, 0.0],
-        color: [1.0, 0.0, 0.0],
-        tex_coord: [1.0, 0.0],
-    },
-    Vertex {
-        pos: [0.5, -0.5, 0.0],
-        color: [0.0, 1.0, 0.0],
-        tex_coord: [0.0, 0.0],
-    },
-    Vertex {
-        pos: [0.5, 0.5, 0.0],
-        color: [0.0, 0.0, 1.0],
-        tex_coord: [0.0, 1.0],
-    },
-    Vertex {
-        pos: [-0.5, 0.5, 0.0],
-        color: [1.0, 1.0, 1.0],
-        tex_coord: [1.0, 1.0],
-    },
-    Vertex {
-        pos: [-0.5, -0.5, -0.5],
-        color: [1.0, 0.0, 0.0],
-        tex_coord: [1.0, 0.0],
-    },
-    Vertex {
-        pos: [0.5, -0.5, -0.5],
-        color: [0.0, 1.0, 0.0],
-        tex_coord: [0.0, 0.0],
-    },
-    Vertex {
-        pos: [0.5, 0.5, -0.5],
-        color: [0.0, 0.0, 1.0],
-        tex_coord: [0.0, 1.0],
-    },
-    Vertex {
-        pos: [-0.5, 0.5, -0.5],
-        color: [1.0, 1.0, 1.0],
-        tex_coord: [1.0, 1.0],
-    },
-];
-
-const INDICES: [u16; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
 #[cfg(debug_assertions)]
 unsafe extern "system" fn vk_debug_utils_callback(
@@ -129,6 +85,8 @@ pub struct VkRsApp {
     width: u32,
     height: u32,
     framebuffer_resized: bool,
+    _vertices: Vec<Vertex>,
+    indices: Vec<u32>,
     vertex_buffer: vk::Buffer,
     vertex_buffer_memory: vk::DeviceMemory,
     index_buffer: vk::Buffer,
@@ -373,7 +331,7 @@ impl VkRsApp {
                 command_buffer,
                 self.index_buffer,
                 0,
-                vk::IndexType::UINT16,
+                vk::IndexType::UINT32,
             )
         }
         #[cfg(debug_assertions)]
@@ -394,7 +352,7 @@ impl VkRsApp {
 
         unsafe {
             self.device
-                .cmd_draw_indexed(command_buffer, INDICES.len() as u32, 1, 0, 0, 0)
+                .cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0)
         };
         #[cfg(debug_assertions)]
         println!("Draw indexed command added.");
@@ -515,8 +473,9 @@ impl VkRsApp {
         device: &Device,
         command_pool: vk::CommandPool,
         graphics_queue: vk::Queue,
+        vertices: &[Vertex],
     ) -> Result<(vk::Buffer, vk::DeviceMemory), Box<dyn Error>> {
-        let buffer_size = (std::mem::size_of::<Vertex>() * VERTICES.len()) as u64;
+        let buffer_size = (std::mem::size_of::<Vertex>() * vertices.len()) as u64;
         let (staging_buffer, staging_buffer_memory) = Self::create_buffer(
             instance,
             physical_device,
@@ -536,7 +495,7 @@ impl VkRsApp {
                 vk::MemoryMapFlags::default(),
             )
         }? as *mut Vertex;
-        unsafe { data.copy_from_nonoverlapping(VERTICES.as_ptr(), VERTICES.len()) };
+        unsafe { data.copy_from_nonoverlapping(vertices.as_ptr(), vertices.len()) };
         unsafe { device.unmap_memory(staging_buffer_memory) };
         #[cfg(debug_assertions)]
         println!("Vertex staging buffer memory copied.");
@@ -579,8 +538,9 @@ impl VkRsApp {
         device: &Device,
         command_pool: vk::CommandPool,
         graphics_queue: vk::Queue,
+        indices: &[u32],
     ) -> Result<(vk::Buffer, vk::DeviceMemory), Box<dyn Error>> {
-        let buffer_size = (std::mem::size_of::<u16>() * INDICES.len()) as u64;
+        let buffer_size = (std::mem::size_of::<u32>() * indices.len()) as u64;
         let (staging_buffer, staging_buffer_memory) = Self::create_buffer(
             instance,
             physical_device,
@@ -599,8 +559,8 @@ impl VkRsApp {
                 buffer_size,
                 vk::MemoryMapFlags::default(),
             )
-        }? as *mut u16;
-        unsafe { data.copy_from_nonoverlapping(INDICES.as_ptr(), INDICES.len()) };
+        }? as *mut u32;
+        unsafe { data.copy_from_nonoverlapping(indices.as_ptr(), indices.len()) };
         unsafe { device.unmap_memory(staging_buffer_memory) };
         #[cfg(debug_assertions)]
         println!("Index staging buffer memory copied.");
@@ -1010,7 +970,7 @@ impl VkRsApp {
         graphics_queue: vk::Queue,
         command_pool: vk::CommandPool,
     ) -> Result<(vk::Image, vk::DeviceMemory), Box<dyn Error>> {
-        let image = image::open(Path::new("textures/texture.jpg"))?;
+        let image = image::open(Path::new("textures/viking_room.png"))?;
         let image_size = (image.width() * image.height() * 4) as vk::DeviceSize;
         let pixels = image.to_rgba8().into_raw();
 
@@ -2001,6 +1961,33 @@ impl VkRsApp {
         Ok(true)
     }
 
+    fn load_model() -> Result<(Vec<Vertex>, Vec<u32>), Box<dyn Error>> {
+        let mut vertices = vec![];
+        let mut indices = vec![];
+
+        let (models, _) = tobj::load_obj("models/viking_room.obj", &LoadOptions::default())?;
+        for model in models.iter() {
+            let mesh = &model.mesh;
+            for &index in mesh.indices.iter() {
+                let vertex = Vertex {
+                    pos: [
+                        mesh.positions[3 * index as usize + 0],
+                        mesh.positions[3 * index as usize + 1],
+                        mesh.positions[3 * index as usize + 2],
+                    ],
+                    color: [1.0, 1.0, 1.0],
+                    tex_coord: [
+                        mesh.texcoords[2 * index as usize + 0],
+                        1.0 - mesh.texcoords[2 * index as usize + 1],
+                    ],
+                };
+                vertices.push(vertex);
+                indices.push(indices.len() as u32)
+            }
+        }
+        Ok((vertices, indices))
+    }
+
     pub fn new(
         window_handle: &dyn raw_window_handle::HasRawWindowHandle,
         width: u32,
@@ -2205,7 +2192,9 @@ impl VkRsApp {
 
         let texture_image_view = Self::create_texture_image_view(&device, texture_image)?;
 
-        let texture_sampler = Self::create_texture_sampler(&&instance, physical_device, &device)?;
+        let texture_sampler = Self::create_texture_sampler(&instance, physical_device, &device)?;
+
+        let (vertices, indices) = Self::load_model()?;
 
         let (vertex_buffer, vertex_buffer_memory) = Self::create_vertex_buffer(
             &instance,
@@ -2213,6 +2202,7 @@ impl VkRsApp {
             &device,
             command_pool,
             graphics_queue,
+            &vertices,
         )?;
 
         let (index_buffer, index_buffer_memory) = Self::create_index_buffer(
@@ -2221,6 +2211,7 @@ impl VkRsApp {
             &device,
             command_pool,
             graphics_queue,
+            &indices,
         )?;
 
         let (uniform_buffers, uniform_buffers_memory) =
@@ -2274,6 +2265,8 @@ impl VkRsApp {
             width,
             height,
             framebuffer_resized: false,
+            _vertices: vertices,
+            indices,
             vertex_buffer,
             vertex_buffer_memory,
             index_buffer,
