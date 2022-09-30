@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 #[cfg(debug_assertions)]
 use std::ffi::c_void;
 use std::ffi::{CStr, CString};
@@ -1964,6 +1965,7 @@ impl VkRsApp {
     fn load_model() -> Result<(Vec<Vertex>, Vec<u32>), Box<dyn Error>> {
         let mut vertices = vec![];
         let mut indices = vec![];
+        let mut unique_vertices = HashMap::new();
 
         let (models, _) = tobj::load_obj("models/viking_room.obj", &LoadOptions::default())?;
         for model in models.iter() {
@@ -1981,8 +1983,14 @@ impl VkRsApp {
                         1.0 - mesh.texcoords[2 * tex_index as usize + 1],
                     ],
                 };
-                vertices.push(vertex);
-                indices.push(indices.len() as u32)
+                if let Some(i) = unique_vertices.get(&vertex) {
+                    indices.push(*i as u32);
+                } else {
+                    let i = vertices.len();
+                    unique_vertices.insert(vertex, i);
+                    vertices.push(vertex);
+                    indices.push(i as u32)
+                }
             }
         }
         Ok((vertices, indices))

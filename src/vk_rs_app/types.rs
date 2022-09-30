@@ -1,4 +1,7 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    hash::Hash,
+    ops::{Deref, DerefMut},
+};
 
 use ash::vk;
 use cgmath::Matrix4;
@@ -23,10 +26,32 @@ pub struct SwapchainSupportDetails {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct Vertex {
     pub pos: [f32; 3],
     pub color: [f32; 3],
     pub tex_coord: [f32; 2],
+}
+
+impl PartialEq for Vertex {
+    fn eq(&self, other: &Self) -> bool {
+        self.pos == other.pos && self.color == other.color && self.tex_coord == other.tex_coord
+    }
+}
+
+impl Eq for Vertex {}
+
+impl Hash for Vertex {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.pos[0].to_bits().hash(state);
+        self.pos[1].to_bits().hash(state);
+        self.pos[2].to_bits().hash(state);
+        self.color[0].to_bits().hash(state);
+        self.color[1].to_bits().hash(state);
+        self.color[2].to_bits().hash(state);
+        self.tex_coord[0].to_bits().hash(state);
+        self.tex_coord[1].to_bits().hash(state);
+    }
 }
 
 impl Vertex {
