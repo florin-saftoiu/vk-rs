@@ -1968,7 +1968,7 @@ impl VkRsApp {
         let (models, _) = tobj::load_obj("models/viking_room.obj", &LoadOptions::default())?;
         for model in models.iter() {
             let mesh = &model.mesh;
-            for &index in mesh.indices.iter() {
+            for (&index, &tex_index) in mesh.indices.iter().zip(mesh.texcoord_indices.iter()) {
                 let vertex = Vertex {
                     pos: [
                         mesh.positions[3 * index as usize + 0],
@@ -1977,8 +1977,8 @@ impl VkRsApp {
                     ],
                     color: [1.0, 1.0, 1.0],
                     tex_coord: [
-                        mesh.texcoords[2 * index as usize + 0],
-                        1.0 - mesh.texcoords[2 * index as usize + 1],
+                        mesh.texcoords[2 * tex_index as usize + 0],
+                        1.0 - mesh.texcoords[2 * tex_index as usize + 1],
                     ],
                 };
                 vertices.push(vertex);
