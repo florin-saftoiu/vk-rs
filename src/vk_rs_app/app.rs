@@ -103,6 +103,8 @@ pub struct VkRsApp {
     depth_image: vk::Image,
     depth_image_memory: vk::DeviceMemory,
     depth_image_view: vk::ImageView,
+    theta: f32,
+    cz: f32,
 }
 
 impl VkRsApp {
@@ -2290,19 +2292,38 @@ impl VkRsApp {
             depth_image,
             depth_image_memory,
             depth_image_view,
+            theta: 0.0,
+            cz: 0.0,
         })
     }
 
-    pub fn update_uniform_buffer(&self, current_image: usize, time: f32) {
+    pub fn update_uniform_buffer(
+        &mut self,
+        current_image: usize,
+        time: f32,
+        w_pressed: bool,
+        s_pressed: bool,
+    ) {
+        if w_pressed {
+            self.cz += 10.0 * time;
+        }
+        if s_pressed {
+            self.cz -= 10.0 * time;
+        }
+        self.theta += 100.0 * time;
         let mut ubo = UniformBufferObject {
-            model: Align16(Matrix4::from_angle_z(Deg(90.0 * time))),
-            view: Align16(Matrix4::look_at_rh(
-                Point3::new(2.0, 2.0, 2.0),
+            model: Align16(
+                Matrix4::from_translation(Vector3::new(0.0, 0.0, -6.0))
+                    * Matrix4::from_angle_y(Deg(self.theta * 0.5))
+                    * Matrix4::from_angle_x(Deg(self.theta)),
+            ),
+            view: Align16(Matrix4::look_at_lh(
+                Point3::new(0.0, 0.0, -0.0000001 - self.cz),
                 Point3::new(0.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 1.0),
+                Vector3::new(0.0, 1.0, 0.0),
             )),
             proj: Align16(cgmath::perspective(
-                Deg(45.0),
+                Deg(90.0),
                 self.swapchain_extent.width as f32 / self.swapchain_extent.height as f32,
                 0.1,
                 10.0,
@@ -2329,7 +2350,7 @@ impl VkRsApp {
         println!("Uniform buffer memory copied.");
     }
 
-    pub fn draw_frame(&mut self, time: f32) {
+    pub fn draw_frame(&mut self, time: f32, w_pressed: bool, s_pressed: bool) {
         unsafe {
             self.device.wait_for_fences(
                 &[self.in_flight_fences[self.current_frame]],
@@ -2358,7 +2379,7 @@ impl VkRsApp {
             },
         };
 
-        self.update_uniform_buffer(self.current_frame, time);
+        self.update_uniform_buffer(self.current_frame, time, w_pressed, s_pressed);
 
         unsafe {
             self.device

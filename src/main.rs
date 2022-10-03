@@ -28,7 +28,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.inner_size().height,
     )?;
     let mut minimized = false;
-    let tp1 = Instant::now();
+    let mut tp1 = Instant::now();
+
+    let mut w_pressed = false;
+    let mut s_pressed = false;
 
     // Main Loop
     event_loop.run(move |event, _, control_flow| {
@@ -45,6 +48,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                     } => match (state, virtual_keycode) {
                         (ElementState::Pressed, Some(VirtualKeyCode::Escape)) => {
                             *control_flow = ControlFlow::Exit
+                        }
+                        (ElementState::Pressed, Some(VirtualKeyCode::W)) => {
+                            w_pressed = true;
+                        }
+                        (ElementState::Released, Some(VirtualKeyCode::W)) => {
+                            w_pressed = false;
+                        }
+                        (ElementState::Pressed, Some(VirtualKeyCode::S)) => {
+                            s_pressed = true;
+                        }
+                        (ElementState::Released, Some(VirtualKeyCode::S)) => {
+                            s_pressed = false;
                         }
                         _ => (),
                     },
@@ -63,7 +78,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if !minimized {
                     let tp2 = Instant::now();
                     let time = tp2.duration_since(tp1).as_secs_f32();
-                    vk_rs_app.draw_frame(time);
+                    tp1 = tp2;
+                    vk_rs_app.draw_frame(time, w_pressed, s_pressed);
                 }
             }
             Event::LoopDestroyed => {
