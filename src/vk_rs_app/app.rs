@@ -1999,7 +1999,8 @@ impl VkRsApp {
     }
 
     pub fn new(
-        window_handle: &dyn raw_window_handle::HasRawWindowHandle,
+        display_handle: raw_window_handle::RawDisplayHandle,
+        window_handle: raw_window_handle::RawWindowHandle,
         width: u32,
         height: u32,
     ) -> Result<Self, Box<dyn Error>> {
@@ -2019,7 +2020,7 @@ impl VkRsApp {
         let enable_validation_layers =
             Self::check_validation_layers_support(&entry, &VALIDATION_LAYERS)?;
 
-        let required_extensions = ash_window::enumerate_required_extensions(window_handle)?;
+        let required_extensions = ash_window::enumerate_required_extensions(display_handle)?;
 
         #[cfg(debug_assertions)]
         {
@@ -2110,8 +2111,9 @@ impl VkRsApp {
         }
 
         let surface_loader = Surface::new(&entry, &instance);
-        let surface =
-            unsafe { ash_window::create_surface(&entry, &instance, window_handle, None) }?;
+        let surface = unsafe {
+            ash_window::create_surface(&entry, &instance, display_handle, window_handle, None)
+        }?;
         #[cfg(debug_assertions)]
         println!("Window surface created.");
 

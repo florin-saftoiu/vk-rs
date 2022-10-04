@@ -4,6 +4,7 @@ mod vk_rs_app;
 
 use std::{error::Error, time::Instant};
 
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::{
     dpi::LogicalSize,
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
@@ -23,7 +24,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Init App (including Vulkan)
     let mut vk_rs_app = VkRsApp::new(
-        &window,
+        window.raw_display_handle(),
+        window.raw_window_handle(),
         window.inner_size().width,
         window.inner_size().height,
     )?;
