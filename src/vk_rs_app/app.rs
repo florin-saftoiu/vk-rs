@@ -104,7 +104,8 @@ pub struct VkRsApp {
     depth_image_memory: vk::DeviceMemory,
     depth_image_view: vk::ImageView,
     theta: f32,
-    cz: f32,
+    pub camera: Point3<f32>,
+    pub target: Point3<f32>,
 }
 
 impl VkRsApp {
@@ -2294,41 +2295,37 @@ impl VkRsApp {
             depth_image,
             depth_image_memory,
             depth_image_view,
-            theta: 0.0,
-            cz: 0.0,
+            theta: -90.0,
+            camera: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            },
+            target: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
         })
     }
 
-    pub fn update_uniform_buffer(
-        &mut self,
-        current_image: usize,
-        time: f32,
-        w_pressed: bool,
-        s_pressed: bool,
-    ) {
-        if w_pressed {
-            self.cz += 10.0 * time;
-        }
-        if s_pressed {
-            self.cz -= 10.0 * time;
-        }
-        self.theta += 100.0 * time;
+    pub fn update_uniform_buffer(&mut self, current_image: usize) {
         let mut ubo = UniformBufferObject {
             model: Align16(
-                Matrix4::from_translation(Vector3::new(0.0, 0.0, -6.0))
-                    * Matrix4::from_angle_y(Deg(self.theta * 0.5))
+                Matrix4::from_translation(Vector3::new(0.0, -0.25, -6.0))
+                    * Matrix4::from_angle_y(Deg(self.theta))
                     * Matrix4::from_angle_x(Deg(self.theta)),
             ),
             view: Align16(Matrix4::look_at_lh(
-                Point3::new(0.0, 0.0, -0.0000001 - self.cz),
-                Point3::new(0.0, 0.0, 0.0),
+                self.camera,
+                self.target,
                 Vector3::new(0.0, 1.0, 0.0),
             )),
             proj: Align16(cgmath::perspective(
                 Deg(90.0),
                 self.swapchain_extent.width as f32 / self.swapchain_extent.height as f32,
                 0.1,
-                10.0,
+                100.0,
             )),
         };
         ubo.proj[1][1] *= -1.0;
@@ -2352,7 +2349,7 @@ impl VkRsApp {
         println!("Uniform buffer memory copied.");
     }
 
-    pub fn draw_frame(&mut self, time: f32, w_pressed: bool, s_pressed: bool) {
+    pub fn draw_frame(&mut self) {
         unsafe {
             self.device.wait_for_fences(
                 &[self.in_flight_fences[self.current_frame]],
@@ -2381,7 +2378,7 @@ impl VkRsApp {
             },
         };
 
-        self.update_uniform_buffer(self.current_frame, time, w_pressed, s_pressed);
+        self.update_uniform_buffer(self.current_frame);
 
         unsafe {
             self.device
