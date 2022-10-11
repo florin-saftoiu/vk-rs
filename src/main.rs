@@ -8,7 +8,7 @@ use cgmath::{Deg, Matrix4, Vector3, Vector4};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::{
     dpi::LogicalSize,
-    event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
+    event::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
@@ -43,6 +43,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut e_pressed = false;
 
     let mut yaw = 0.0;
+    let mut pitch = 0.0;
 
     // Main Loop
     event_loop.run(move |event, _, control_flow| {
@@ -121,6 +122,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 _ => (),
             },
+            Event::DeviceEvent {
+                device_id: _,
+                event,
+            } => match event {
+                DeviceEvent::MouseMotion { delta: (dx, dy) } => {
+                    yaw -= dx as f32 * 0.1;
+                    pitch -= dy as f32 * 0.1;
+                }
+                _ => (),
+            },
             Event::MainEventsCleared => {
                 if !minimized {
                     let tp2 = Instant::now();
@@ -128,7 +139,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     tp1 = tp2;
 
                     let target = Vector4::new(0.0, 0.0, -1.0, 1.0);
-                    let camera_rotation = Matrix4::from_angle_y(Deg(yaw));
+                    let camera_rotation =
+                        Matrix4::from_angle_y(Deg(yaw)) * Matrix4::from_angle_x(Deg(pitch));
                     let look_dir = (camera_rotation * target).truncate();
                     vk_rs_app.target = vk_rs_app.camera - look_dir;
 
