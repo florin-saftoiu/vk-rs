@@ -4,7 +4,7 @@ mod vk_rs_app;
 
 use std::{error::Error, time::Instant};
 
-use cgmath::{Deg, Matrix4, Vector4};
+use cgmath::{Deg, Matrix4, Vector3, Vector4};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::{
     dpi::LogicalSize,
@@ -133,36 +133,39 @@ fn main() -> Result<(), Box<dyn Error>> {
                     vk_rs_app.target = vk_rs_app.camera - look_dir;
 
                     let forward = look_dir * 6.0 * time;
+                    let left = look_dir.cross(Vector3::new(0.0, 1.0, 0.0)) * 6.0 * time;
 
                     if w_pressed {
+                        // move forward
                         vk_rs_app.camera += forward;
-                        if vk_rs_app.camera.z < -10.0 {
-                            vk_rs_app.camera.z = -10.0;
-                        }
                     }
                     if s_pressed {
+                        // move backwards
                         vk_rs_app.camera -= forward;
-                        if vk_rs_app.camera.z > -0.000001 {
-                            vk_rs_app.camera.z = -0.000001;
-                        }
                     }
                     if a_pressed {
-                        vk_rs_app.camera.x -= 6.0 * time;
+                        // strafe left
+                        vk_rs_app.camera -= left;
                     }
                     if d_pressed {
-                        vk_rs_app.camera.x += 6.0 * time;
+                        // strafe right
+                        vk_rs_app.camera += left;
                     }
                     if space_pressed {
+                        // move up
                         vk_rs_app.camera.y += 6.0 * time;
                     }
                     if c_pressed {
+                        // move down
                         vk_rs_app.camera.y -= 6.0 * time;
                     }
                     if q_pressed {
-                        yaw -= 20.0 * time;
+                        // look left
+                        yaw += 20.0 * time;
                     }
                     if e_pressed {
-                        yaw += 20.0 * time;
+                        // look right
+                        yaw -= 20.0 * time;
                     }
 
                     vk_rs_app.draw_frame();
