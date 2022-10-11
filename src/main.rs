@@ -4,7 +4,7 @@ mod vk_rs_app;
 
 use std::{error::Error, time::Instant};
 
-use cgmath::{Deg, Matrix4, Vector3, Vector4};
+use cgmath::{Deg, InnerSpace, Matrix4, Vector3, Vector4};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::{
     dpi::LogicalSize,
@@ -142,10 +142,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let camera_rotation =
                         Matrix4::from_angle_y(Deg(yaw)) * Matrix4::from_angle_x(Deg(pitch));
                     let look_dir = (camera_rotation * target).truncate();
-                    vk_rs_app.target = vk_rs_app.camera - look_dir;
 
                     let forward = look_dir * 6.0 * time;
-                    let left = look_dir.cross(Vector3::new(0.0, 1.0, 0.0)) * 6.0 * time;
+                    let right =
+                        look_dir.cross(Vector3::new(0.0, 1.0, 0.0)).normalize() * 6.0 * time;
 
                     if w_pressed {
                         // move forward
@@ -157,11 +157,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                     if a_pressed {
                         // strafe left
-                        vk_rs_app.camera -= left;
+                        vk_rs_app.camera -= right;
                     }
                     if d_pressed {
                         // strafe right
-                        vk_rs_app.camera += left;
+                        vk_rs_app.camera += right;
                     }
                     if space_pressed {
                         // move up
@@ -180,7 +180,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                         yaw -= 20.0 * time;
                     }
 
+                    vk_rs_app.target = vk_rs_app.camera - look_dir;
+
                     vk_rs_app.draw_frame();
+                    window.set_title(
+                        format!(
+                            "vk-rs - XYZ: {:>11.5}, {:>11.5}, {:>11.5} - FPS: {:>5.0}",
+                            vk_rs_app.camera.x,
+                            vk_rs_app.camera.y,
+                            vk_rs_app.camera.z,
+                            1.0 / time,
+                        )
+                        .as_str(),
+                    );
                 }
             }
             Event::LoopDestroyed => {
