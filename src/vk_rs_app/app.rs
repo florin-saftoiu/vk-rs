@@ -1970,7 +1970,11 @@ impl VkRsApp {
         let mut indices = vec![];
         let mut unique_vertices = HashMap::new();
 
-        let (models, _) = tobj::load_obj("models/viking_room.obj", &LoadOptions::default())?;
+        let load_options = LoadOptions {
+            // triangulate: true, // enable if model is not composed of triangles only
+            ..Default::default()
+        };
+        let (models, _) = tobj::load_obj("models/viking_room.obj", &load_options)?;
         for model in models.iter() {
             let mesh = &model.mesh;
             for (&index, &tex_index) in mesh.indices.iter().zip(mesh.texcoord_indices.iter()) {
