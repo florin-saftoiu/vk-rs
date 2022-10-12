@@ -1,6 +1,6 @@
 #![windows_subsystem = "windows"]
 
-mod vk_rs_app;
+mod renderer;
 
 use std::{error::Error, time::Instant};
 
@@ -13,7 +13,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use vk_rs_app::VkRsApp;
+use renderer::VkRenderer;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Init Window
@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .build(&event_loop)?;
 
     // Init App (including Vulkan)
-    let mut vk_rs_app = VkRsApp::new(
+    let mut renderer = VkRenderer::new(
         window.raw_display_handle(),
         window.raw_window_handle(),
         window.inner_size().width,
@@ -117,7 +117,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         minimized = true;
                     } else {
                         minimized = false;
-                        vk_rs_app.window_resized(size.width, size.height);
+                        renderer.window_resized(size.width, size.height);
                     }
                 }
                 _ => (),
@@ -149,27 +149,27 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     if w_pressed {
                         // move forward
-                        vk_rs_app.camera += forward;
+                        renderer.camera += forward;
                     }
                     if s_pressed {
                         // move backwards
-                        vk_rs_app.camera -= forward;
+                        renderer.camera -= forward;
                     }
                     if a_pressed {
                         // strafe left
-                        vk_rs_app.camera -= right;
+                        renderer.camera -= right;
                     }
                     if d_pressed {
                         // strafe right
-                        vk_rs_app.camera += right;
+                        renderer.camera += right;
                     }
                     if space_pressed {
                         // move up
-                        vk_rs_app.camera.y += 6.0 * time;
+                        renderer.camera.y += 6.0 * time;
                     }
                     if c_pressed {
                         // move down
-                        vk_rs_app.camera.y -= 6.0 * time;
+                        renderer.camera.y -= 6.0 * time;
                     }
                     if q_pressed {
                         // look left
@@ -180,15 +180,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                         yaw -= 20.0 * time;
                     }
 
-                    vk_rs_app.target = vk_rs_app.camera - look_dir;
+                    renderer.target = renderer.camera - look_dir;
 
-                    vk_rs_app.draw_frame();
+                    renderer.draw_frame();
                     window.set_title(
                         format!(
                             "vk-rs - XYZ: {:>11.5}, {:>11.5}, {:>11.5} - FPS: {:>5.0}",
-                            vk_rs_app.camera.x,
-                            vk_rs_app.camera.y,
-                            vk_rs_app.camera.z,
+                            renderer.camera.x,
+                            renderer.camera.y,
+                            renderer.camera.z,
                             1.0 / time,
                         )
                         .as_str(),
@@ -196,7 +196,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             Event::LoopDestroyed => {
-                vk_rs_app.loop_destroyed();
+                renderer.loop_destroyed();
             }
             _ => (),
         }

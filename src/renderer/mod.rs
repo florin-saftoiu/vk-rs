@@ -1,3 +1,6 @@
+mod tools;
+mod types;
+
 use std::collections::HashMap;
 #[cfg(debug_assertions)]
 use std::ffi::c_void;
@@ -13,12 +16,10 @@ use ash::{
 use cgmath::{Deg, Matrix4, Point3, Vector3};
 use tobj::LoadOptions;
 
-use crate::vk_rs_app::types::Align16;
+use crate::renderer::types::Align16;
 
-use super::{
-    tools::read_shader, types::QueueFamilyIndices, types::SwapchainSupportDetails,
-    types::UniformBufferObject, types::Vertex,
-};
+use tools::read_shader;
+use types::{QueueFamilyIndices, SwapchainSupportDetails, UniformBufferObject, Vertex};
 
 #[cfg(debug_assertions)]
 const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
@@ -55,7 +56,7 @@ unsafe extern "system" fn vk_debug_utils_callback(
     vk::FALSE
 }
 
-pub struct VkRsApp {
+pub struct VkRenderer {
     _entry: Entry,
     instance: Instance,
     #[cfg(debug_assertions)]
@@ -108,7 +109,7 @@ pub struct VkRsApp {
     pub target: Point3<f32>,
 }
 
-impl VkRsApp {
+impl VkRenderer {
     fn cleanup_swapchain(&mut self) {
         unsafe { self.device.destroy_image_view(self.depth_image_view, None) };
         #[cfg(debug_assertions)]
@@ -2466,7 +2467,7 @@ impl VkRsApp {
     }
 }
 
-impl Drop for VkRsApp {
+impl Drop for VkRenderer {
     fn drop(&mut self) {
         self.cleanup_swapchain();
 
