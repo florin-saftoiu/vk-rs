@@ -56,7 +56,7 @@ unsafe extern "system" fn vk_debug_utils_callback(
     vk::FALSE
 }
 
-pub struct VkRenderer {
+pub struct Renderer {
     _entry: Entry,
     instance: Instance,
     #[cfg(debug_assertions)]
@@ -109,7 +109,7 @@ pub struct VkRenderer {
     pub target: Point3<f32>,
 }
 
-impl VkRenderer {
+impl Renderer {
     fn cleanup_swapchain(&mut self) {
         unsafe { self.device.destroy_image_view(self.depth_image_view, None) };
         #[cfg(debug_assertions)]
@@ -2467,7 +2467,7 @@ impl VkRenderer {
     }
 }
 
-impl Drop for VkRenderer {
+impl Drop for Renderer {
     fn drop(&mut self) {
         self.cleanup_swapchain();
 

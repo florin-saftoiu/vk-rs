@@ -13,7 +13,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use renderer::VkRenderer;
+use renderer::Renderer;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Init Window
@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .build(&event_loop)?;
 
     // Init App (including Vulkan)
-    let mut renderer = VkRenderer::new(
+    let mut renderer = Renderer::new(
         window.raw_display_handle(),
         window.raw_window_handle(),
         window.inner_size().width,
