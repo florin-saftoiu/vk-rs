@@ -100,7 +100,7 @@ pub struct Renderer {
     depth_image: vk::Image,
     depth_image_memory: vk::DeviceMemory,
     depth_image_view: vk::ImageView,
-    theta: f32,
+    pub theta: f32,
     pub camera: Point3<f32>,
     pub target: Point3<f32>,
 }
@@ -1972,6 +1972,9 @@ impl Renderer {
         window_handle: raw_window_handle::RawWindowHandle,
         width: u32,
         height: u32,
+        obj: &str,
+        texture: &str,
+        triangulate: bool,
     ) -> Result<Self, Box<dyn Error>> {
         // Init Vulkan
         // Ash loads Vulkan dynamically, ash::Entry is the library loader and the entrypoint into the Vulkan API.
@@ -2163,7 +2166,7 @@ impl Renderer {
             &depth_image_view,
         )?;
 
-        let model = Model::new("models/viking_room.obj", "textures/viking_room.png", false)?;
+        let model = Model::new(obj, texture, triangulate)?;
 
         let (texture_image, texture_image_memory) = Self::create_texture_image(
             &instance,
@@ -2263,7 +2266,7 @@ impl Renderer {
             depth_image,
             depth_image_memory,
             depth_image_view,
-            theta: -90.0,
+            theta: 0.0,
             camera: Point3 {
                 x: 0.0,
                 y: 0.0,
@@ -2293,7 +2296,7 @@ impl Renderer {
                 Deg(90.0),
                 self.swapchain_extent.width as f32 / self.swapchain_extent.height as f32,
                 0.1,
-                100.0,
+                1000.0,
             )),
         };
         ubo.proj[1][1] *= -1.0;
