@@ -1,7 +1,7 @@
+mod model;
 mod tools;
 mod types;
 
-use std::collections::HashMap;
 #[cfg(debug_assertions)]
 use std::ffi::c_void;
 use std::ffi::{CStr, CString};
@@ -14,12 +14,9 @@ use ash::{
     vk, Device, Entry, Instance,
 };
 use cgmath::{Deg, Matrix4, Point3, Vector3};
-use tobj::LoadOptions;
 
-use crate::renderer::types::Align16;
-
-use tools::read_shader;
-use types::{QueueFamilyIndices, SwapchainSupportDetails, UniformBufferObject, Vertex};
+use model::{Model, Texture};
+use types::{Align16, QueueFamilyIndices, SwapchainSupportDetails, UniformBufferObject, Vertex};
 
 #[cfg(debug_assertions)]
 const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
@@ -87,8 +84,7 @@ pub struct Renderer {
     width: u32,
     height: u32,
     framebuffer_resized: bool,
-    _vertices: Vec<Vertex>,
-    indices: Vec<u32>,
+    model: Model,
     vertex_buffer: vk::Buffer,
     vertex_buffer_memory: vk::DeviceMemory,
     index_buffer: vk::Buffer,
@@ -356,8 +352,14 @@ impl Renderer {
         println!("Bind descriptor sets command added.");
 
         unsafe {
-            self.device
-                .cmd_draw_indexed(command_buffer, self.indices.len() as u32, 1, 0, 0, 0)
+            self.device.cmd_draw_indexed(
+                command_buffer,
+                self.model.indices.len() as u32,
+                1,
+                0,
+                0,
+                0,
+            )
         };
         #[cfg(debug_assertions)]
         println!("Draw indexed command added.");
@@ -974,10 +976,9 @@ impl Renderer {
         device: &Device,
         graphics_queue: vk::Queue,
         command_pool: vk::CommandPool,
+        texture: &Texture,
     ) -> Result<(vk::Image, vk::DeviceMemory), Box<dyn Error>> {
-        let image = image::open(Path::new("textures/viking_room.png"))?;
-        let image_size = (image.width() * image.height() * 4) as vk::DeviceSize;
-        let pixels = image.to_rgba8().into_raw();
+        let image_size = (texture.width * texture.height * 4) as vk::DeviceSize;
 
         let (staging_buffer, staging_buffer_memory) = Self::create_buffer(
             instance,
@@ -998,7 +999,7 @@ impl Renderer {
                 vk::MemoryMapFlags::default(),
             )
         }? as *mut u8;
-        unsafe { data.copy_from_nonoverlapping(pixels.as_ptr(), pixels.len()) };
+        unsafe { data.copy_from_nonoverlapping(texture.pixels.as_ptr(), texture.pixels.len()) };
         unsafe { device.unmap_memory(staging_buffer_memory) };
         #[cfg(debug_assertions)]
         println!("Texture staging buffer memory copied.");
@@ -1007,8 +1008,8 @@ impl Renderer {
             instance,
             physical_device,
             device,
-            image.width(),
-            image.height(),
+            texture.width,
+            texture.height,
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
@@ -1032,8 +1033,8 @@ impl Renderer {
             command_pool,
             staging_buffer,
             texture_image,
-            image.width(),
-            image.height(),
+            texture.width,
+            texture.height,
         )?;
         Self::transition_image_layout(
             device,
@@ -1290,7 +1291,7 @@ impl Renderer {
         render_pass: vk::RenderPass,
         descriptor_set_layout: vk::DescriptorSetLayout,
     ) -> Result<(vk::PipelineLayout, vk::Pipeline), Box<dyn Error>> {
-        let vert_shader = read_shader(Path::new("shaders/vert.spv"))?;
+        let vert_shader = tools::read_shader(Path::new("shaders/vert.spv"))?;
         let vert_shader_module = Self::create_shader_module(device, &vert_shader)?;
         let vert_shader_entrypoint = CString::new("main").unwrap();
         let vert_shader_stage_info = vk::PipelineShaderStageCreateInfo {
@@ -1302,7 +1303,7 @@ impl Renderer {
         #[cfg(debug_assertions)]
         println!("Vertex shader loaded.");
 
-        let frag_shader = read_shader(Path::new("shaders/frag.spv"))?;
+        let frag_shader = tools::read_shader(Path::new("shaders/frag.spv"))?;
         let frag_shader_module = Self::create_shader_module(device, &frag_shader)?;
         let frag_shader_entrypoint = CString::new("main").unwrap();
         let frag_shader_stage_info = vk::PipelineShaderStageCreateInfo {
@@ -1966,44 +1967,6 @@ impl Renderer {
         Ok(true)
     }
 
-    fn load_model() -> Result<(Vec<Vertex>, Vec<u32>), Box<dyn Error>> {
-        let mut vertices = vec![];
-        let mut indices = vec![];
-        let mut unique_vertices = HashMap::new();
-
-        let load_options = LoadOptions {
-            // triangulate: true, // enable if model is not composed of triangles only
-            ..Default::default()
-        };
-        let (models, _) = tobj::load_obj("models/viking_room.obj", &load_options)?;
-        for model in models.iter() {
-            let mesh = &model.mesh;
-            for (&index, &tex_index) in mesh.indices.iter().zip(mesh.texcoord_indices.iter()) {
-                let vertex = Vertex {
-                    pos: [
-                        mesh.positions[3 * index as usize + 0],
-                        mesh.positions[3 * index as usize + 1],
-                        mesh.positions[3 * index as usize + 2],
-                    ],
-                    color: [1.0, 1.0, 1.0],
-                    tex_coord: [
-                        mesh.texcoords[2 * tex_index as usize + 0],
-                        1.0 - mesh.texcoords[2 * tex_index as usize + 1],
-                    ],
-                };
-                if let Some(i) = unique_vertices.get(&vertex) {
-                    indices.push(*i as u32);
-                } else {
-                    let i = vertices.len();
-                    unique_vertices.insert(vertex, i);
-                    vertices.push(vertex);
-                    indices.push(i as u32)
-                }
-            }
-        }
-        Ok((vertices, indices))
-    }
-
     pub fn new(
         display_handle: raw_window_handle::RawDisplayHandle,
         window_handle: raw_window_handle::RawWindowHandle,
@@ -2200,19 +2163,20 @@ impl Renderer {
             &depth_image_view,
         )?;
 
+        let model = Model::new("models/viking_room.obj", "textures/viking_room.png", false)?;
+
         let (texture_image, texture_image_memory) = Self::create_texture_image(
             &instance,
             &physical_device,
             &device,
             graphics_queue,
             command_pool,
+            &model.texture,
         )?;
 
         let texture_image_view = Self::create_texture_image_view(&device, texture_image)?;
 
         let texture_sampler = Self::create_texture_sampler(&instance, physical_device, &device)?;
-
-        let (vertices, indices) = Self::load_model()?;
 
         let (vertex_buffer, vertex_buffer_memory) = Self::create_vertex_buffer(
             &instance,
@@ -2220,7 +2184,7 @@ impl Renderer {
             &device,
             command_pool,
             graphics_queue,
-            &vertices,
+            &model.vertices,
         )?;
 
         let (index_buffer, index_buffer_memory) = Self::create_index_buffer(
@@ -2229,7 +2193,7 @@ impl Renderer {
             &device,
             command_pool,
             graphics_queue,
-            &indices,
+            &model.indices,
         )?;
 
         let (uniform_buffers, uniform_buffers_memory) =
@@ -2283,8 +2247,7 @@ impl Renderer {
             width,
             height,
             framebuffer_resized: false,
-            _vertices: vertices,
-            indices,
+            model,
             vertex_buffer,
             vertex_buffer_memory,
             index_buffer,
