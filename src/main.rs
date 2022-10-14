@@ -29,10 +29,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.raw_window_handle(),
         window.inner_size().width,
         window.inner_size().height,
-        "models/viking_room.obj",
-        "textures/viking_room.png",
-        false,
     )?;
+    renderer.load_model("models/viking_room.obj", "textures/viking_room.png", false)?;
     renderer.theta = -90.0;
     let mut minimized = false;
     let mut tp1 = Instant::now();

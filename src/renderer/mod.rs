@@ -84,18 +84,10 @@ pub struct Renderer {
     width: u32,
     height: u32,
     framebuffer_resized: bool,
-    model: Model,
-    vertex_buffer: vk::Buffer,
-    vertex_buffer_memory: vk::DeviceMemory,
-    index_buffer: vk::Buffer,
-    index_buffer_memory: vk::DeviceMemory,
+    model: Option<Model>,
     uniform_buffers: Vec<vk::Buffer>,
     uniform_buffers_memory: Vec<vk::DeviceMemory>,
     descriptor_pool: vk::DescriptorPool,
-    descriptor_sets: Vec<vk::DescriptorSet>,
-    texture_image: vk::Image,
-    texture_image_memory: vk::DeviceMemory,
-    texture_image_view: vk::ImageView,
     texture_sampler: vk::Sampler,
     depth_image: vk::Image,
     depth_image_memory: vk::DeviceMemory,
@@ -320,49 +312,55 @@ impl Renderer {
         #[cfg(debug_assertions)]
         println!("Bind graphics pipeline command added.");
 
-        unsafe {
-            self.device
-                .cmd_bind_vertex_buffers(command_buffer, 0, &[self.vertex_buffer], &[0])
+        if let Some(model) = &self.model {
+            unsafe {
+                self.device.cmd_bind_vertex_buffers(
+                    command_buffer,
+                    0,
+                    &[model.vertex_buffer()],
+                    &[0],
+                )
+            }
+            #[cfg(debug_assertions)]
+            println!("Bind vertex buffers command added.");
+
+            unsafe {
+                self.device.cmd_bind_index_buffer(
+                    command_buffer,
+                    model.index_buffer(),
+                    0,
+                    vk::IndexType::UINT32,
+                )
+            }
+            #[cfg(debug_assertions)]
+            println!("Bind index buffer command added.");
+
+            unsafe {
+                self.device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    0,
+                    &[model.descriptor_sets()[self.current_frame]],
+                    &[],
+                )
+            };
+            #[cfg(debug_assertions)]
+            println!("Bind descriptor sets command added.");
+
+            unsafe {
+                self.device.cmd_draw_indexed(
+                    command_buffer,
+                    model.indices().len() as u32,
+                    1,
+                    0,
+                    0,
+                    0,
+                )
+            };
+            #[cfg(debug_assertions)]
+            println!("Draw indexed command added.");
         }
-        #[cfg(debug_assertions)]
-        println!("Bind vertex buffers command added.");
-
-        unsafe {
-            self.device.cmd_bind_index_buffer(
-                command_buffer,
-                self.index_buffer,
-                0,
-                vk::IndexType::UINT32,
-            )
-        }
-        #[cfg(debug_assertions)]
-        println!("Bind index buffer command added.");
-
-        unsafe {
-            self.device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline_layout,
-                0,
-                &[self.descriptor_sets[self.current_frame]],
-                &[],
-            )
-        };
-        #[cfg(debug_assertions)]
-        println!("Bind descriptor sets command added.");
-
-        unsafe {
-            self.device.cmd_draw_indexed(
-                command_buffer,
-                self.model.indices().len() as u32,
-                1,
-                0,
-                0,
-                0,
-            )
-        };
-        #[cfg(debug_assertions)]
-        println!("Draw indexed command added.");
 
         unsafe { self.device.cmd_end_render_pass(command_buffer) };
         #[cfg(debug_assertions)]
@@ -450,14 +448,12 @@ impl Renderer {
     }
 
     fn copy_buffer(
-        device: &Device,
-        command_pool: vk::CommandPool,
-        graphics_queue: vk::Queue,
+        &self,
         src_buffer: vk::Buffer,
         dst_buffer: vk::Buffer,
         size: vk::DeviceSize,
     ) -> Result<(), Box<dyn Error>> {
-        let command_buffer = Self::begin_single_time_commands(device, command_pool)?;
+        let command_buffer = Self::begin_single_time_commands(&self.device, self.command_pool)?;
 
         let copy_region = vk::BufferCopy {
             src_offset: 0,
@@ -465,28 +461,32 @@ impl Renderer {
             size,
             ..Default::default()
         };
-        unsafe { device.cmd_copy_buffer(command_buffer, src_buffer, dst_buffer, &[copy_region]) };
+        unsafe {
+            self.device
+                .cmd_copy_buffer(command_buffer, src_buffer, dst_buffer, &[copy_region])
+        };
         #[cfg(debug_assertions)]
         println!("Copy command added.");
 
-        Self::end_single_time_commands(device, command_buffer, command_pool, graphics_queue)?;
+        Self::end_single_time_commands(
+            &self.device,
+            command_buffer,
+            self.command_pool,
+            self.graphics_queue,
+        )?;
 
         Ok(())
     }
 
     fn create_vertex_buffer(
-        instance: &Instance,
-        physical_device: &vk::PhysicalDevice,
-        device: &Device,
-        command_pool: vk::CommandPool,
-        graphics_queue: vk::Queue,
+        &self,
         vertices: &[Vertex],
     ) -> Result<(vk::Buffer, vk::DeviceMemory), Box<dyn Error>> {
         let buffer_size = (std::mem::size_of::<Vertex>() * vertices.len()) as u64;
         let (staging_buffer, staging_buffer_memory) = Self::create_buffer(
-            instance,
-            physical_device,
-            device,
+            &self.instance,
+            &self.physical_device,
+            &self.device,
             buffer_size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
@@ -495,7 +495,7 @@ impl Renderer {
         println!("Vertex staging buffer created.");
 
         let data = unsafe {
-            device.map_memory(
+            self.device.map_memory(
                 staging_buffer_memory,
                 0,
                 buffer_size,
@@ -503,14 +503,14 @@ impl Renderer {
             )
         }? as *mut Vertex;
         unsafe { data.copy_from_nonoverlapping(vertices.as_ptr(), vertices.len()) };
-        unsafe { device.unmap_memory(staging_buffer_memory) };
+        unsafe { self.device.unmap_memory(staging_buffer_memory) };
         #[cfg(debug_assertions)]
         println!("Vertex staging buffer memory copied.");
 
         let (vertex_buffer, vertex_buffer_memory) = Self::create_buffer(
-            instance,
-            physical_device,
-            device,
+            &self.instance,
+            &self.physical_device,
+            &self.device,
             buffer_size,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -518,21 +518,14 @@ impl Renderer {
         #[cfg(debug_assertions)]
         println!("Vertex buffer created.");
 
-        Self::copy_buffer(
-            device,
-            command_pool,
-            graphics_queue,
-            staging_buffer,
-            vertex_buffer,
-            buffer_size,
-        )?;
+        self.copy_buffer(staging_buffer, vertex_buffer, buffer_size)?;
         #[cfg(debug_assertions)]
         println!("Vertex staging buffer copied to vertex buffer.");
 
-        unsafe { device.destroy_buffer(staging_buffer, None) };
+        unsafe { self.device.destroy_buffer(staging_buffer, None) };
         #[cfg(debug_assertions)]
         println!("Vertex staging buffer dropped.");
-        unsafe { device.free_memory(staging_buffer_memory, None) };
+        unsafe { self.device.free_memory(staging_buffer_memory, None) };
         #[cfg(debug_assertions)]
         println!("Vertex staging buffer memory freed.");
 
@@ -540,18 +533,14 @@ impl Renderer {
     }
 
     fn create_index_buffer(
-        instance: &Instance,
-        physical_device: &vk::PhysicalDevice,
-        device: &Device,
-        command_pool: vk::CommandPool,
-        graphics_queue: vk::Queue,
+        &self,
         indices: &[u32],
     ) -> Result<(vk::Buffer, vk::DeviceMemory), Box<dyn Error>> {
         let buffer_size = (std::mem::size_of::<u32>() * indices.len()) as u64;
         let (staging_buffer, staging_buffer_memory) = Self::create_buffer(
-            instance,
-            physical_device,
-            device,
+            &self.instance,
+            &self.physical_device,
+            &self.device,
             buffer_size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
@@ -560,7 +549,7 @@ impl Renderer {
         println!("Index staging buffer created.");
 
         let data = unsafe {
-            device.map_memory(
+            self.device.map_memory(
                 staging_buffer_memory,
                 0,
                 buffer_size,
@@ -568,14 +557,14 @@ impl Renderer {
             )
         }? as *mut u32;
         unsafe { data.copy_from_nonoverlapping(indices.as_ptr(), indices.len()) };
-        unsafe { device.unmap_memory(staging_buffer_memory) };
+        unsafe { self.device.unmap_memory(staging_buffer_memory) };
         #[cfg(debug_assertions)]
         println!("Index staging buffer memory copied.");
 
         let (index_buffer, index_buffer_memory) = Self::create_buffer(
-            instance,
-            physical_device,
-            device,
+            &self.instance,
+            &self.physical_device,
+            &self.device,
             buffer_size,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -583,21 +572,14 @@ impl Renderer {
         #[cfg(debug_assertions)]
         println!("Index buffer created.");
 
-        Self::copy_buffer(
-            device,
-            command_pool,
-            graphics_queue,
-            staging_buffer,
-            index_buffer,
-            buffer_size,
-        )?;
+        self.copy_buffer(staging_buffer, index_buffer, buffer_size)?;
         #[cfg(debug_assertions)]
         println!("Index staging buffer copied to index buffer.");
 
-        unsafe { device.destroy_buffer(staging_buffer, None) };
+        unsafe { self.device.destroy_buffer(staging_buffer, None) };
         #[cfg(debug_assertions)]
         println!("Index staging buffer dropped.");
-        unsafe { device.free_memory(staging_buffer_memory, None) };
+        unsafe { self.device.free_memory(staging_buffer_memory, None) };
         #[cfg(debug_assertions)]
         println!("Index staging buffer memory freed.");
 
@@ -659,34 +641,30 @@ impl Renderer {
     }
 
     fn create_descriptor_sets(
-        device: &Device,
-        descriptor_pool: vk::DescriptorPool,
-        descriptor_set_layout: vk::DescriptorSetLayout,
-        uniform_buffers: &[vk::Buffer],
+        &self,
         texture_image_view: vk::ImageView,
-        texture_sampler: vk::Sampler,
     ) -> Result<Vec<vk::DescriptorSet>, Box<dyn Error>> {
-        let layouts = vec![descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
+        let layouts = vec![self.descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
         let alloc_info = vk::DescriptorSetAllocateInfo {
-            descriptor_pool,
+            descriptor_pool: self.descriptor_pool,
             descriptor_set_count: MAX_FRAMES_IN_FLIGHT as u32,
             p_set_layouts: layouts.as_ptr(),
             ..Default::default()
         };
-        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&alloc_info) }?;
+        let descriptor_sets = unsafe { self.device.allocate_descriptor_sets(&alloc_info) }?;
         #[cfg(debug_assertions)]
         println!("Descriptor sets created.");
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             let buffer_info = vk::DescriptorBufferInfo {
-                buffer: uniform_buffers[i],
+                buffer: self.uniform_buffers[i],
                 offset: 0,
                 range: std::mem::size_of::<UniformBufferObject>() as u64,
             };
             let image_info = vk::DescriptorImageInfo {
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 image_view: texture_image_view,
-                sampler: texture_sampler,
+                sampler: self.texture_sampler,
             };
             let descriptor_writes = [
                 vk::WriteDescriptorSet {
@@ -708,7 +686,7 @@ impl Renderer {
                     ..Default::default()
                 },
             ];
-            unsafe { device.update_descriptor_sets(&descriptor_writes, &[]) };
+            unsafe { self.device.update_descriptor_sets(&descriptor_writes, &[]) };
         }
 
         Ok(descriptor_sets)
@@ -839,15 +817,13 @@ impl Renderer {
     }
 
     fn copy_buffer_to_image(
-        device: &Device,
-        graphics_queue: vk::Queue,
-        command_pool: vk::CommandPool,
+        &self,
         buffer: vk::Buffer,
         image: vk::Image,
         width: u32,
         height: u32,
     ) -> Result<(), Box<dyn Error>> {
-        let command_buffer = Self::begin_single_time_commands(device, command_pool)?;
+        let command_buffer = Self::begin_single_time_commands(&self.device, self.command_pool)?;
 
         let region = vk::BufferImageCopy {
             buffer_offset: 0,
@@ -870,7 +846,7 @@ impl Renderer {
         };
 
         unsafe {
-            device.cmd_copy_buffer_to_image(
+            self.device.cmd_copy_buffer_to_image(
                 command_buffer,
                 buffer,
                 image,
@@ -879,7 +855,12 @@ impl Renderer {
             )
         };
 
-        Self::end_single_time_commands(device, command_buffer, command_pool, graphics_queue)?;
+        Self::end_single_time_commands(
+            &self.device,
+            command_buffer,
+            self.command_pool,
+            self.graphics_queue,
+        )?;
 
         Ok(())
     }
@@ -971,19 +952,15 @@ impl Renderer {
     }
 
     fn create_texture_image(
-        instance: &Instance,
-        physical_device: &vk::PhysicalDevice,
-        device: &Device,
-        graphics_queue: vk::Queue,
-        command_pool: vk::CommandPool,
+        &self,
         texture: &Texture,
     ) -> Result<(vk::Image, vk::DeviceMemory), Box<dyn Error>> {
         let image_size = (texture.width() * texture.height() * 4) as vk::DeviceSize;
 
         let (staging_buffer, staging_buffer_memory) = Self::create_buffer(
-            instance,
-            physical_device,
-            device,
+            &self.instance,
+            &self.physical_device,
+            &self.device,
             image_size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
@@ -992,7 +969,7 @@ impl Renderer {
         println!("Texture staging buffer created.");
 
         let data = unsafe {
-            device.map_memory(
+            self.device.map_memory(
                 staging_buffer_memory,
                 0,
                 image_size,
@@ -1000,14 +977,14 @@ impl Renderer {
             )
         }? as *mut u8;
         unsafe { data.copy_from_nonoverlapping(texture.pixels().as_ptr(), texture.pixels().len()) };
-        unsafe { device.unmap_memory(staging_buffer_memory) };
+        unsafe { self.device.unmap_memory(staging_buffer_memory) };
         #[cfg(debug_assertions)]
         println!("Texture staging buffer memory copied.");
 
         let (texture_image, texture_image_memory) = Self::create_image(
-            instance,
-            physical_device,
-            device,
+            &self.instance,
+            &self.physical_device,
+            &self.device,
             texture.width(),
             texture.height(),
             vk::Format::R8G8B8A8_SRGB,
@@ -1019,37 +996,34 @@ impl Renderer {
         println!("Texture image created.");
 
         Self::transition_image_layout(
-            device,
-            graphics_queue,
-            command_pool,
+            &self.device,
+            self.graphics_queue,
+            self.command_pool,
             texture_image,
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         )?;
-        Self::copy_buffer_to_image(
-            device,
-            graphics_queue,
-            command_pool,
+        self.copy_buffer_to_image(
             staging_buffer,
             texture_image,
             texture.width(),
             texture.height(),
         )?;
         Self::transition_image_layout(
-            device,
-            graphics_queue,
-            command_pool,
+            &self.device,
+            self.graphics_queue,
+            self.command_pool,
             texture_image,
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         )?;
 
-        unsafe { device.destroy_buffer(staging_buffer, None) };
+        unsafe { self.device.destroy_buffer(staging_buffer, None) };
         #[cfg(debug_assertions)]
         println!("Texture staging buffer dropped.");
-        unsafe { device.free_memory(staging_buffer_memory, None) };
+        unsafe { self.device.free_memory(staging_buffer_memory, None) };
         #[cfg(debug_assertions)]
         println!("Texture staging buffer memory freed.");
 
@@ -1083,11 +1057,11 @@ impl Renderer {
     }
 
     fn create_texture_image_view(
-        device: &Device,
+        &self,
         texture_image: vk::Image,
     ) -> Result<vk::ImageView, Box<dyn Error>> {
         let image_view = Self::create_image_view(
-            device,
+            &self.device,
             texture_image,
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageAspectFlags::COLOR,
@@ -1972,9 +1946,6 @@ impl Renderer {
         window_handle: raw_window_handle::RawWindowHandle,
         width: u32,
         height: u32,
-        obj: &str,
-        texture: &str,
-        triangulate: bool,
     ) -> Result<Self, Box<dyn Error>> {
         // Init Vulkan
         // Ash loads Vulkan dynamically, ash::Entry is the library loader and the entrypoint into the Vulkan API.
@@ -2166,52 +2137,12 @@ impl Renderer {
             &depth_image_view,
         )?;
 
-        let model = Model::new(obj, texture, triangulate)?;
-
-        let (texture_image, texture_image_memory) = Self::create_texture_image(
-            &instance,
-            &physical_device,
-            &device,
-            graphics_queue,
-            command_pool,
-            model.texture(),
-        )?;
-
-        let texture_image_view = Self::create_texture_image_view(&device, texture_image)?;
-
         let texture_sampler = Self::create_texture_sampler(&instance, physical_device, &device)?;
-
-        let (vertex_buffer, vertex_buffer_memory) = Self::create_vertex_buffer(
-            &instance,
-            &physical_device,
-            &device,
-            command_pool,
-            graphics_queue,
-            model.vertices(),
-        )?;
-
-        let (index_buffer, index_buffer_memory) = Self::create_index_buffer(
-            &instance,
-            &physical_device,
-            &device,
-            command_pool,
-            graphics_queue,
-            model.indices(),
-        )?;
 
         let (uniform_buffers, uniform_buffers_memory) =
             Self::create_uniform_buffers(&instance, &physical_device, &device)?;
 
         let descriptor_pool = Self::create_descriptor_pool(&device)?;
-
-        let descriptor_sets = Self::create_descriptor_sets(
-            &device,
-            descriptor_pool,
-            descriptor_set_layout,
-            &uniform_buffers,
-            texture_image_view,
-            texture_sampler,
-        )?;
 
         let command_buffers = Self::create_command_buffers(&device, command_pool)?;
 
@@ -2250,18 +2181,10 @@ impl Renderer {
             width,
             height,
             framebuffer_resized: false,
-            model,
-            vertex_buffer,
-            vertex_buffer_memory,
-            index_buffer,
-            index_buffer_memory,
+            model: None,
             uniform_buffers,
             uniform_buffers_memory,
             descriptor_pool,
-            descriptor_sets,
-            texture_image,
-            texture_image_memory,
-            texture_image_view,
             texture_sampler,
             depth_image,
             depth_image_memory,
@@ -2278,6 +2201,16 @@ impl Renderer {
                 z: 0.0,
             },
         })
+    }
+
+    pub fn load_model(
+        &mut self,
+        obj: &str,
+        texture: &str,
+        triangulate: bool,
+    ) -> Result<(), Box<dyn Error>> {
+        self.model = Some(Model::new(&self, obj, texture, triangulate)?);
+        Ok(())
     }
 
     pub fn update_uniform_buffer(&mut self, current_image: usize) {
@@ -2435,26 +2368,44 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
+        if let Some(model) = &self.model {
+            unsafe {
+                self.device
+                    .destroy_image_view(model.texture_image_view(), None)
+            };
+            #[cfg(debug_assertions)]
+            println!("Texture image view dropped.");
+
+            unsafe { self.device.destroy_image(model.texture_image(), None) };
+            #[cfg(debug_assertions)]
+            println!("Texture image dropped.");
+
+            unsafe { self.device.free_memory(model.texture_image_memory(), None) };
+            #[cfg(debug_assertions)]
+            println!("Texture image memory freed.");
+
+            unsafe { self.device.destroy_buffer(model.index_buffer(), None) };
+            #[cfg(debug_assertions)]
+            println!("Index buffer dropped.");
+
+            unsafe { self.device.free_memory(model.index_buffer_memory(), None) };
+            #[cfg(debug_assertions)]
+            println!("Index buffer memory freed.");
+
+            unsafe { self.device.destroy_buffer(model.vertex_buffer(), None) };
+            #[cfg(debug_assertions)]
+            println!("Vertex buffer dropped.");
+
+            unsafe { self.device.free_memory(model.vertex_buffer_memory(), None) };
+            #[cfg(debug_assertions)]
+            println!("Vertex buffer memory freed.");
+        }
+
         self.cleanup_swapchain();
 
         unsafe { self.device.destroy_sampler(self.texture_sampler, None) };
         #[cfg(debug_assertions)]
         println!("Texture sampler dropped.");
-
-        unsafe {
-            self.device
-                .destroy_image_view(self.texture_image_view, None)
-        };
-        #[cfg(debug_assertions)]
-        println!("Texture image view dropped.");
-
-        unsafe { self.device.destroy_image(self.texture_image, None) };
-        #[cfg(debug_assertions)]
-        println!("Texture image dropped.");
-
-        unsafe { self.device.free_memory(self.texture_image_memory, None) };
-        #[cfg(debug_assertions)]
-        println!("Texture image memory freed.");
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             unsafe { self.device.destroy_buffer(self.uniform_buffers[i], None) };
@@ -2479,22 +2430,6 @@ impl Drop for Renderer {
         };
         #[cfg(debug_assertions)]
         println!("Descriptor set layout dropped.");
-
-        unsafe { self.device.destroy_buffer(self.index_buffer, None) };
-        #[cfg(debug_assertions)]
-        println!("Index buffer dropped.");
-
-        unsafe { self.device.free_memory(self.index_buffer_memory, None) };
-        #[cfg(debug_assertions)]
-        println!("Index buffer memory freed.");
-
-        unsafe { self.device.destroy_buffer(self.vertex_buffer, None) };
-        #[cfg(debug_assertions)]
-        println!("Vertex buffer dropped.");
-
-        unsafe { self.device.free_memory(self.vertex_buffer_memory, None) };
-        #[cfg(debug_assertions)]
-        println!("Vertex buffer memory freed.");
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             unsafe {

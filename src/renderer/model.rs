@@ -1,8 +1,9 @@
 use std::{collections::HashMap, error::Error, path::Path};
 
+use ash::vk;
 use tobj::LoadOptions;
 
-use super::types::Vertex;
+use super::{types::Vertex, Renderer};
 
 pub struct Texture {
     width: u32,
@@ -25,25 +26,70 @@ impl Texture {
 }
 
 pub struct Model {
-    vertices: Vec<Vertex>,
+    _vertices: Vec<Vertex>,
     indices: Vec<u32>,
-    texture: Texture,
+    vertex_buffer: vk::Buffer,
+    vertex_buffer_memory: vk::DeviceMemory,
+    index_buffer: vk::Buffer,
+    index_buffer_memory: vk::DeviceMemory,
+    _texture: Texture,
+    texture_image: vk::Image,
+    texture_image_memory: vk::DeviceMemory,
+    texture_image_view: vk::ImageView,
+    descriptor_sets: Vec<vk::DescriptorSet>,
 }
 
 impl Model {
-    pub fn vertices(&self) -> &[Vertex] {
-        &self.vertices
+    pub fn _vertices(&self) -> &[Vertex] {
+        &self._vertices
     }
 
     pub fn indices(&self) -> &[u32] {
         &self.indices
     }
 
-    pub fn texture(&self) -> &Texture {
-        &self.texture
+    pub fn vertex_buffer(&self) -> vk::Buffer {
+        self.vertex_buffer
     }
 
-    pub fn new(obj: &str, texture: &str, triangulate: bool) -> Result<Self, Box<dyn Error>> {
+    pub fn vertex_buffer_memory(&self) -> vk::DeviceMemory {
+        self.vertex_buffer_memory
+    }
+
+    pub fn index_buffer(&self) -> vk::Buffer {
+        self.index_buffer
+    }
+
+    pub fn index_buffer_memory(&self) -> vk::DeviceMemory {
+        self.index_buffer_memory
+    }
+
+    pub fn _texture(&self) -> &Texture {
+        &self._texture
+    }
+
+    pub fn texture_image(&self) -> vk::Image {
+        self.texture_image
+    }
+
+    pub fn texture_image_memory(&self) -> vk::DeviceMemory {
+        self.texture_image_memory
+    }
+
+    pub fn texture_image_view(&self) -> vk::ImageView {
+        self.texture_image_view
+    }
+
+    pub fn descriptor_sets(&self) -> &[vk::DescriptorSet] {
+        &self.descriptor_sets
+    }
+
+    pub fn new(
+        renderer: &Renderer,
+        obj: &str,
+        texture: &str,
+        triangulate: bool,
+    ) -> Result<Self, Box<dyn Error>> {
         let mut vertices = vec![];
         let mut indices = vec![];
         let mut unique_vertices = HashMap::new();
@@ -79,17 +125,34 @@ impl Model {
             }
         }
 
+        let (vertex_buffer, vertex_buffer_memory) = renderer.create_vertex_buffer(&vertices)?;
+        let (index_buffer, index_buffer_memory) = renderer.create_index_buffer(&indices)?;
+
         let image = image::open(Path::new(texture))?;
         let pixels = image.to_rgba8().into_raw();
 
+        let texture = Texture {
+            width: image.width(),
+            height: image.height(),
+            pixels,
+        };
+
+        let (texture_image, texture_image_memory) = renderer.create_texture_image(&texture)?;
+        let texture_image_view = renderer.create_texture_image_view(texture_image)?;
+        let descriptor_sets = renderer.create_descriptor_sets(texture_image_view)?;
+
         Ok(Model {
-            vertices,
+            _vertices: vertices,
             indices,
-            texture: Texture {
-                width: image.width(),
-                height: image.height(),
-                pixels,
-            },
+            vertex_buffer,
+            vertex_buffer_memory,
+            index_buffer,
+            index_buffer_memory,
+            _texture: texture,
+            texture_image,
+            texture_image_memory,
+            texture_image_view,
+            descriptor_sets,
         })
     }
 }
