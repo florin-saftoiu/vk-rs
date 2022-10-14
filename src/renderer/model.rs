@@ -5,18 +5,44 @@ use tobj::LoadOptions;
 use super::types::Vertex;
 
 pub struct Texture {
-    pub width: u32,
-    pub height: u32,
-    pub pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
+}
+
+impl Texture {
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn pixels(&self) -> &[u8] {
+        &self.pixels
+    }
 }
 
 pub struct Model {
-    pub vertices: Vec<Vertex>,
-    pub indices: Vec<u32>,
-    pub texture: Texture,
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+    texture: Texture,
 }
 
 impl Model {
+    pub fn vertices(&self) -> &[Vertex] {
+        &self.vertices
+    }
+
+    pub fn indices(&self) -> &[u32] {
+        &self.indices
+    }
+
+    pub fn texture(&self) -> &Texture {
+        &self.texture
+    }
+
     pub fn new(obj: &str, texture: &str, triangulate: bool) -> Result<Self, Box<dyn Error>> {
         let mut vertices = vec![];
         let mut indices = vec![];

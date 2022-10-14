@@ -354,7 +354,7 @@ impl Renderer {
         unsafe {
             self.device.cmd_draw_indexed(
                 command_buffer,
-                self.model.indices.len() as u32,
+                self.model.indices().len() as u32,
                 1,
                 0,
                 0,
@@ -978,7 +978,7 @@ impl Renderer {
         command_pool: vk::CommandPool,
         texture: &Texture,
     ) -> Result<(vk::Image, vk::DeviceMemory), Box<dyn Error>> {
-        let image_size = (texture.width * texture.height * 4) as vk::DeviceSize;
+        let image_size = (texture.width() * texture.height() * 4) as vk::DeviceSize;
 
         let (staging_buffer, staging_buffer_memory) = Self::create_buffer(
             instance,
@@ -999,7 +999,7 @@ impl Renderer {
                 vk::MemoryMapFlags::default(),
             )
         }? as *mut u8;
-        unsafe { data.copy_from_nonoverlapping(texture.pixels.as_ptr(), texture.pixels.len()) };
+        unsafe { data.copy_from_nonoverlapping(texture.pixels().as_ptr(), texture.pixels().len()) };
         unsafe { device.unmap_memory(staging_buffer_memory) };
         #[cfg(debug_assertions)]
         println!("Texture staging buffer memory copied.");
@@ -1008,8 +1008,8 @@ impl Renderer {
             instance,
             physical_device,
             device,
-            texture.width,
-            texture.height,
+            texture.width(),
+            texture.height(),
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
@@ -1033,8 +1033,8 @@ impl Renderer {
             command_pool,
             staging_buffer,
             texture_image,
-            texture.width,
-            texture.height,
+            texture.width(),
+            texture.height(),
         )?;
         Self::transition_image_layout(
             device,
@@ -2174,7 +2174,7 @@ impl Renderer {
             &device,
             graphics_queue,
             command_pool,
-            &model.texture,
+            model.texture(),
         )?;
 
         let texture_image_view = Self::create_texture_image_view(&device, texture_image)?;
@@ -2187,7 +2187,7 @@ impl Renderer {
             &device,
             command_pool,
             graphics_queue,
-            &model.vertices,
+            model.vertices(),
         )?;
 
         let (index_buffer, index_buffer_memory) = Self::create_index_buffer(
@@ -2196,7 +2196,7 @@ impl Renderer {
             &device,
             command_pool,
             graphics_queue,
-            &model.indices,
+            model.indices(),
         )?;
 
         let (uniform_buffers, uniform_buffers_memory) =
