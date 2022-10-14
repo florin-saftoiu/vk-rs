@@ -222,6 +222,49 @@ impl Renderer {
         Ok(())
     }
 
+    fn cleanup_model(&self) {
+        if let Some(model) = &self.model {
+            unsafe {
+                self.device
+                    .free_descriptor_sets(self.descriptor_pool, model.descriptor_sets())
+            }
+            .expect("Error freeing descriptor sets !");
+            #[cfg(debug_assertions)]
+            println!("Descriptor sets freed.");
+
+            unsafe {
+                self.device
+                    .destroy_image_view(model.texture_image_view(), None)
+            };
+            #[cfg(debug_assertions)]
+            println!("Texture image view dropped.");
+
+            unsafe { self.device.destroy_image(model.texture_image(), None) };
+            #[cfg(debug_assertions)]
+            println!("Texture image dropped.");
+
+            unsafe { self.device.free_memory(model.texture_image_memory(), None) };
+            #[cfg(debug_assertions)]
+            println!("Texture image memory freed.");
+
+            unsafe { self.device.destroy_buffer(model.index_buffer(), None) };
+            #[cfg(debug_assertions)]
+            println!("Index buffer dropped.");
+
+            unsafe { self.device.free_memory(model.index_buffer_memory(), None) };
+            #[cfg(debug_assertions)]
+            println!("Index buffer memory freed.");
+
+            unsafe { self.device.destroy_buffer(model.vertex_buffer(), None) };
+            #[cfg(debug_assertions)]
+            println!("Vertex buffer dropped.");
+
+            unsafe { self.device.free_memory(model.vertex_buffer_memory(), None) };
+            #[cfg(debug_assertions)]
+            println!("Vertex buffer memory freed.");
+        }
+    }
+
     fn create_sync_objects(
         device: &Device,
     ) -> Result<(Vec<vk::Semaphore>, Vec<vk::Semaphore>, Vec<vk::Fence>), Box<dyn Error>> {
@@ -631,6 +674,7 @@ impl Renderer {
             pool_size_count: pool_sizes.len() as u32,
             p_pool_sizes: pool_sizes.as_ptr(),
             max_sets: MAX_FRAMES_IN_FLIGHT as u32,
+            flags: vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
             ..Default::default()
         };
         let descriptor_pool = unsafe { device.create_descriptor_pool(&pool_info, None) }?;
@@ -2209,7 +2253,11 @@ impl Renderer {
         texture: &str,
         triangulate: bool,
     ) -> Result<(), Box<dyn Error>> {
-        self.model = Some(Model::new(&self, obj, texture, triangulate)?);
+        if self.model.is_some() {
+            self.cleanup_model();
+        }
+        self.model
+            .replace(Model::new(&self, obj, texture, triangulate)?);
         Ok(())
     }
 
@@ -2368,38 +2416,7 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        if let Some(model) = &self.model {
-            unsafe {
-                self.device
-                    .destroy_image_view(model.texture_image_view(), None)
-            };
-            #[cfg(debug_assertions)]
-            println!("Texture image view dropped.");
-
-            unsafe { self.device.destroy_image(model.texture_image(), None) };
-            #[cfg(debug_assertions)]
-            println!("Texture image dropped.");
-
-            unsafe { self.device.free_memory(model.texture_image_memory(), None) };
-            #[cfg(debug_assertions)]
-            println!("Texture image memory freed.");
-
-            unsafe { self.device.destroy_buffer(model.index_buffer(), None) };
-            #[cfg(debug_assertions)]
-            println!("Index buffer dropped.");
-
-            unsafe { self.device.free_memory(model.index_buffer_memory(), None) };
-            #[cfg(debug_assertions)]
-            println!("Index buffer memory freed.");
-
-            unsafe { self.device.destroy_buffer(model.vertex_buffer(), None) };
-            #[cfg(debug_assertions)]
-            println!("Vertex buffer dropped.");
-
-            unsafe { self.device.free_memory(model.vertex_buffer_memory(), None) };
-            #[cfg(debug_assertions)]
-            println!("Vertex buffer memory freed.");
-        }
+        self.cleanup_model();
 
         self.cleanup_swapchain();
 
