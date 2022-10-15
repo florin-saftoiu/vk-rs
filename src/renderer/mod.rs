@@ -88,6 +88,7 @@ pub struct Renderer {
     uniform_buffers: Vec<vk::Buffer>,
     uniform_buffers_memory: Vec<vk::DeviceMemory>,
     descriptor_pool: vk::DescriptorPool,
+    descriptor_sets: Vec<vk::DescriptorSet>,
     texture_sampler: vk::Sampler,
     depth_image: vk::Image,
     depth_image_memory: vk::DeviceMemory,
@@ -224,14 +225,6 @@ impl Renderer {
 
     fn cleanup_model(&self) {
         if let Some(model) = &self.model {
-            unsafe {
-                self.device
-                    .free_descriptor_sets(self.descriptor_pool, model.descriptor_sets())
-            }
-            .expect("Error freeing descriptor sets !");
-            #[cfg(debug_assertions)]
-            println!("Descriptor sets freed.");
-
             unsafe {
                 self.device
                     .destroy_image_view(model.texture_image_view(), None)
@@ -384,7 +377,7 @@ impl Renderer {
                     vk::PipelineBindPoint::GRAPHICS,
                     self.pipeline_layout,
                     0,
-                    &[model.descriptor_sets()[self.current_frame]],
+                    &[self.descriptor_sets[self.current_frame]],
                     &[],
                 )
             };
@@ -685,55 +678,66 @@ impl Renderer {
     }
 
     fn create_descriptor_sets(
-        &self,
-        texture_image_view: vk::ImageView,
+        device: &Device,
+        descriptor_set_layout: vk::DescriptorSetLayout,
+        descriptor_pool: vk::DescriptorPool,
+        uniform_buffers: &[vk::Buffer],
     ) -> Result<Vec<vk::DescriptorSet>, Box<dyn Error>> {
-        let layouts = vec![self.descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
+        let layouts = vec![descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
         let alloc_info = vk::DescriptorSetAllocateInfo {
-            descriptor_pool: self.descriptor_pool,
+            descriptor_pool: descriptor_pool,
             descriptor_set_count: MAX_FRAMES_IN_FLIGHT as u32,
             p_set_layouts: layouts.as_ptr(),
             ..Default::default()
         };
-        let descriptor_sets = unsafe { self.device.allocate_descriptor_sets(&alloc_info) }?;
+        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&alloc_info) }?;
         #[cfg(debug_assertions)]
         println!("Descriptor sets created.");
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             let buffer_info = vk::DescriptorBufferInfo {
-                buffer: self.uniform_buffers[i],
+                buffer: uniform_buffers[i],
                 offset: 0,
                 range: std::mem::size_of::<UniformBufferObject>() as u64,
             };
+            let descriptor_writes = [vk::WriteDescriptorSet {
+                dst_set: descriptor_sets[i],
+                dst_binding: 0,
+                dst_array_element: 0,
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: 1,
+                p_buffer_info: &buffer_info,
+                ..Default::default()
+            }];
+            unsafe { device.update_descriptor_sets(&descriptor_writes, &[]) };
+        }
+
+        Ok(descriptor_sets)
+    }
+
+    fn update_descriptor_sets(
+        &self,
+        texture_image_view: vk::ImageView,
+    ) -> Result<(), Box<dyn Error>> {
+        for i in 0..MAX_FRAMES_IN_FLIGHT {
             let image_info = vk::DescriptorImageInfo {
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 image_view: texture_image_view,
                 sampler: self.texture_sampler,
             };
-            let descriptor_writes = [
-                vk::WriteDescriptorSet {
-                    dst_set: descriptor_sets[i],
-                    dst_binding: 0,
-                    dst_array_element: 0,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    descriptor_count: 1,
-                    p_buffer_info: &buffer_info,
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_set: descriptor_sets[i],
-                    dst_binding: 1,
-                    dst_array_element: 0,
-                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                    descriptor_count: 1,
-                    p_image_info: &image_info,
-                    ..Default::default()
-                },
-            ];
+            let descriptor_writes = [vk::WriteDescriptorSet {
+                dst_set: self.descriptor_sets[i],
+                dst_binding: 1,
+                dst_array_element: 0,
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                descriptor_count: 1,
+                p_image_info: &image_info,
+                ..Default::default()
+            }];
             unsafe { self.device.update_descriptor_sets(&descriptor_writes, &[]) };
         }
 
-        Ok(descriptor_sets)
+        Ok(())
     }
 
     fn create_command_pool(
@@ -2188,6 +2192,13 @@ impl Renderer {
 
         let descriptor_pool = Self::create_descriptor_pool(&device)?;
 
+        let descriptor_sets = Self::create_descriptor_sets(
+            &device,
+            descriptor_set_layout,
+            descriptor_pool,
+            &uniform_buffers,
+        )?;
+
         let command_buffers = Self::create_command_buffers(&device, command_pool)?;
 
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
@@ -2229,6 +2240,7 @@ impl Renderer {
             uniform_buffers,
             uniform_buffers_memory,
             descriptor_pool,
+            descriptor_sets,
             texture_sampler,
             depth_image,
             depth_image_memory,
@@ -2405,7 +2417,7 @@ impl Renderer {
         self.framebuffer_resized = true;
     }
 
-    pub fn loop_destroyed(&self) {
+    pub fn wait_idle(&self) {
         unsafe {
             self.device
                 .device_wait_idle()

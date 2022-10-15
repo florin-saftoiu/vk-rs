@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.inner_size().height,
     )?;
     renderer.load_model("models/cube.obj", "textures/cube.png", false)?;
-    renderer.load_model("models/viking_room.obj", "textures/viking_room.png", false)?;
+    renderer.load_model("models/viking_room.obj", "textures/viking_room.png", true)?;
     renderer.theta = -90.0;
     let mut minimized = false;
     let mut tp1 = Instant::now();
@@ -111,6 +111,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                         (ElementState::Released, Some(VirtualKeyCode::E)) => {
                             e_pressed = false;
+                        }
+                        (ElementState::Released, Some(VirtualKeyCode::R)) => {
+                            /*renderer.wait_idle();
+                            renderer
+                                .load_model("models/cube.obj", "textures/cube.png", false)
+                                .expect("Error replacing model !");*/
+                            renderer.camera.x = 0.0;
+                            renderer.camera.y = 0.0;
+                            renderer.camera.z = 0.0;
+                            yaw = 0.0;
+                            pitch = 0.0;
                         }
                         _ => (),
                     },
@@ -199,7 +210,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             Event::LoopDestroyed => {
-                renderer.loop_destroyed();
+                renderer.wait_idle();
             }
             _ => (),
         }
