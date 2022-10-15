@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.inner_size().height,
     )?;
     renderer.load_model("models/cube.obj", "textures/cube.png", false)?;
-    renderer.load_model("models/viking_room.obj", "textures/viking_room.png", true)?;
+    renderer.load_model("models/viking_room.obj", "textures/viking_room.png", false)?;
     renderer.theta = -90.0;
     let mut minimized = false;
     let mut tp1 = Instant::now();
