@@ -84,7 +84,7 @@ pub struct Renderer {
     width: u32,
     height: u32,
     framebuffer_resized: bool,
-    model: Option<Model>,
+    models: Vec<Model>,
     uniform_buffers: Vec<vk::Buffer>,
     uniform_buffers_memory: Vec<vk::DeviceMemory>,
     descriptor_pool: vk::DescriptorPool,
@@ -224,7 +224,7 @@ impl Renderer {
     }
 
     fn cleanup_model(&self) {
-        if let Some(model) = &self.model {
+        if let Some(model) = self.models.first() {
             unsafe {
                 self.device
                     .destroy_image_view(model.texture_image_view(), None)
@@ -348,7 +348,20 @@ impl Renderer {
         #[cfg(debug_assertions)]
         println!("Bind graphics pipeline command added.");
 
-        if let Some(model) = &self.model {
+        unsafe {
+            self.device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                0,
+                &[self.descriptor_sets[self.current_frame]],
+                &[],
+            )
+        };
+        #[cfg(debug_assertions)]
+        println!("Bind descriptor sets command added.");
+
+        if let Some(model) = self.models.first() {
             unsafe {
                 self.device.cmd_bind_vertex_buffers(
                     command_buffer,
@@ -370,19 +383,6 @@ impl Renderer {
             }
             #[cfg(debug_assertions)]
             println!("Bind index buffer command added.");
-
-            unsafe {
-                self.device.cmd_bind_descriptor_sets(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.pipeline_layout,
-                    0,
-                    &[self.descriptor_sets[self.current_frame]],
-                    &[],
-                )
-            };
-            #[cfg(debug_assertions)]
-            println!("Bind descriptor sets command added.");
 
             unsafe {
                 self.device.cmd_draw_indexed(
@@ -2236,7 +2236,7 @@ impl Renderer {
             width,
             height,
             framebuffer_resized: false,
-            model: None,
+            models: vec![],
             uniform_buffers,
             uniform_buffers_memory,
             descriptor_pool,
@@ -2265,11 +2265,14 @@ impl Renderer {
         texture: &str,
         triangulate: bool,
     ) -> Result<(), Box<dyn Error>> {
-        if self.model.is_some() {
+        if self.models.first().is_some() {
             self.cleanup_model();
+            self.models[0] = Model::new(&self, obj, texture, triangulate)?;
+        } else {
+            self.models
+                .push(Model::new(&self, obj, texture, triangulate)?);
         }
-        self.model
-            .replace(Model::new(&self, obj, texture, triangulate)?);
+
         Ok(())
     }
 
