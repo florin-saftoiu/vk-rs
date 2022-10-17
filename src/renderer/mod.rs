@@ -23,6 +23,7 @@ const VALIDATION_LAYERS: [&str; 1] = ["VK_LAYER_KHRONOS_validation"];
 
 const DEVICE_EXTENSIONS: [&str; 1] = ["VK_KHR_swapchain"];
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
+const MAX_MODELS: usize = 2;
 
 #[cfg(debug_assertions)]
 unsafe extern "system" fn vk_debug_utils_callback(
@@ -88,7 +89,6 @@ pub struct Renderer {
     uniform_buffers: Vec<vk::Buffer>,
     uniform_buffers_memory: Vec<vk::DeviceMemory>,
     descriptor_pool: vk::DescriptorPool,
-    descriptor_sets: Vec<vk::DescriptorSet>,
     texture_sampler: vk::Sampler,
     depth_image: vk::Image,
     depth_image_memory: vk::DeviceMemory,
@@ -223,39 +223,37 @@ impl Renderer {
         Ok(())
     }
 
-    fn cleanup_model(&self) {
-        if let Some(model) = self.models.first() {
-            unsafe {
-                self.device
-                    .destroy_image_view(model.texture_image_view(), None)
-            };
-            #[cfg(debug_assertions)]
-            println!("Texture image view dropped.");
+    fn cleanup_model(&self, model: &Model) {
+        unsafe {
+            self.device
+                .destroy_image_view(model.texture_image_view(), None)
+        };
+        #[cfg(debug_assertions)]
+        println!("Texture image view dropped.");
 
-            unsafe { self.device.destroy_image(model.texture_image(), None) };
-            #[cfg(debug_assertions)]
-            println!("Texture image dropped.");
+        unsafe { self.device.destroy_image(model.texture_image(), None) };
+        #[cfg(debug_assertions)]
+        println!("Texture image dropped.");
 
-            unsafe { self.device.free_memory(model.texture_image_memory(), None) };
-            #[cfg(debug_assertions)]
-            println!("Texture image memory freed.");
+        unsafe { self.device.free_memory(model.texture_image_memory(), None) };
+        #[cfg(debug_assertions)]
+        println!("Texture image memory freed.");
 
-            unsafe { self.device.destroy_buffer(model.index_buffer(), None) };
-            #[cfg(debug_assertions)]
-            println!("Index buffer dropped.");
+        unsafe { self.device.destroy_buffer(model.index_buffer(), None) };
+        #[cfg(debug_assertions)]
+        println!("Index buffer dropped.");
 
-            unsafe { self.device.free_memory(model.index_buffer_memory(), None) };
-            #[cfg(debug_assertions)]
-            println!("Index buffer memory freed.");
+        unsafe { self.device.free_memory(model.index_buffer_memory(), None) };
+        #[cfg(debug_assertions)]
+        println!("Index buffer memory freed.");
 
-            unsafe { self.device.destroy_buffer(model.vertex_buffer(), None) };
-            #[cfg(debug_assertions)]
-            println!("Vertex buffer dropped.");
+        unsafe { self.device.destroy_buffer(model.vertex_buffer(), None) };
+        #[cfg(debug_assertions)]
+        println!("Vertex buffer dropped.");
 
-            unsafe { self.device.free_memory(model.vertex_buffer_memory(), None) };
-            #[cfg(debug_assertions)]
-            println!("Vertex buffer memory freed.");
-        }
+        unsafe { self.device.free_memory(model.vertex_buffer_memory(), None) };
+        #[cfg(debug_assertions)]
+        println!("Vertex buffer memory freed.");
     }
 
     fn create_sync_objects(
@@ -348,20 +346,7 @@ impl Renderer {
         #[cfg(debug_assertions)]
         println!("Bind graphics pipeline command added.");
 
-        unsafe {
-            self.device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline_layout,
-                0,
-                &[self.descriptor_sets[self.current_frame]],
-                &[],
-            )
-        };
-        #[cfg(debug_assertions)]
-        println!("Bind descriptor sets command added.");
-
-        if let Some(model) = self.models.first() {
+        for model in self.models.iter() {
             unsafe {
                 self.device.cmd_bind_vertex_buffers(
                     command_buffer,
@@ -383,6 +368,19 @@ impl Renderer {
             }
             #[cfg(debug_assertions)]
             println!("Bind index buffer command added.");
+
+            unsafe {
+                self.device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    0,
+                    &[model.descriptor_sets()[self.current_frame]],
+                    &[],
+                )
+            };
+            #[cfg(debug_assertions)]
+            println!("Bind descriptor sets command added.");
 
             unsafe {
                 self.device.cmd_draw_indexed(
@@ -666,8 +664,7 @@ impl Renderer {
         let pool_info = vk::DescriptorPoolCreateInfo {
             pool_size_count: pool_sizes.len() as u32,
             p_pool_sizes: pool_sizes.as_ptr(),
-            max_sets: MAX_FRAMES_IN_FLIGHT as u32,
-            flags: vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
+            max_sets: (MAX_MODELS * MAX_FRAMES_IN_FLIGHT) as u32,
             ..Default::default()
         };
         let descriptor_pool = unsafe { device.create_descriptor_pool(&pool_info, None) }?;
@@ -678,66 +675,55 @@ impl Renderer {
     }
 
     fn create_descriptor_sets(
-        device: &Device,
-        descriptor_set_layout: vk::DescriptorSetLayout,
-        descriptor_pool: vk::DescriptorPool,
-        uniform_buffers: &[vk::Buffer],
+        &self,
+        texture_image_view: vk::ImageView,
     ) -> Result<Vec<vk::DescriptorSet>, Box<dyn Error>> {
-        let layouts = vec![descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
+        let layouts = vec![self.descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
         let alloc_info = vk::DescriptorSetAllocateInfo {
-            descriptor_pool: descriptor_pool,
+            descriptor_pool: self.descriptor_pool,
             descriptor_set_count: MAX_FRAMES_IN_FLIGHT as u32,
             p_set_layouts: layouts.as_ptr(),
             ..Default::default()
         };
-        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&alloc_info) }?;
+        let descriptor_sets = unsafe { self.device.allocate_descriptor_sets(&alloc_info) }?;
         #[cfg(debug_assertions)]
         println!("Descriptor sets created.");
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             let buffer_info = vk::DescriptorBufferInfo {
-                buffer: uniform_buffers[i],
+                buffer: self.uniform_buffers[i],
                 offset: 0,
                 range: std::mem::size_of::<UniformBufferObject>() as u64,
             };
-            let descriptor_writes = [vk::WriteDescriptorSet {
-                dst_set: descriptor_sets[i],
-                dst_binding: 0,
-                dst_array_element: 0,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: 1,
-                p_buffer_info: &buffer_info,
-                ..Default::default()
-            }];
-            unsafe { device.update_descriptor_sets(&descriptor_writes, &[]) };
-        }
-
-        Ok(descriptor_sets)
-    }
-
-    fn update_descriptor_sets(
-        &self,
-        texture_image_view: vk::ImageView,
-    ) -> Result<(), Box<dyn Error>> {
-        for i in 0..MAX_FRAMES_IN_FLIGHT {
             let image_info = vk::DescriptorImageInfo {
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 image_view: texture_image_view,
                 sampler: self.texture_sampler,
             };
-            let descriptor_writes = [vk::WriteDescriptorSet {
-                dst_set: self.descriptor_sets[i],
-                dst_binding: 1,
-                dst_array_element: 0,
-                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: 1,
-                p_image_info: &image_info,
-                ..Default::default()
-            }];
+            let descriptor_writes = [
+                vk::WriteDescriptorSet {
+                    dst_set: descriptor_sets[i],
+                    dst_binding: 0,
+                    dst_array_element: 0,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    descriptor_count: 1,
+                    p_buffer_info: &buffer_info,
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_set: descriptor_sets[i],
+                    dst_binding: 1,
+                    dst_array_element: 0,
+                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    descriptor_count: 1,
+                    p_image_info: &image_info,
+                    ..Default::default()
+                },
+            ];
             unsafe { self.device.update_descriptor_sets(&descriptor_writes, &[]) };
         }
 
-        Ok(())
+        Ok(descriptor_sets)
     }
 
     fn create_command_pool(
@@ -2192,13 +2178,6 @@ impl Renderer {
 
         let descriptor_pool = Self::create_descriptor_pool(&device)?;
 
-        let descriptor_sets = Self::create_descriptor_sets(
-            &device,
-            descriptor_set_layout,
-            descriptor_pool,
-            &uniform_buffers,
-        )?;
-
         let command_buffers = Self::create_command_buffers(&device, command_pool)?;
 
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
@@ -2240,7 +2219,6 @@ impl Renderer {
             uniform_buffers,
             uniform_buffers_memory,
             descriptor_pool,
-            descriptor_sets,
             texture_sampler,
             depth_image,
             depth_image_memory,
@@ -2265,13 +2243,8 @@ impl Renderer {
         texture: &str,
         triangulate: bool,
     ) -> Result<(), Box<dyn Error>> {
-        if self.models.first().is_some() {
-            self.cleanup_model();
-            self.models[0] = Model::new(&self, obj, texture, triangulate)?;
-        } else {
-            self.models
-                .push(Model::new(&self, obj, texture, triangulate)?);
-        }
+        self.models
+            .push(Model::new(&self, obj, texture, triangulate)?);
 
         Ok(())
     }
@@ -2431,7 +2404,9 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        self.cleanup_model();
+        for model in self.models.iter() {
+            self.cleanup_model(model);
+        }
 
         self.cleanup_swapchain();
 

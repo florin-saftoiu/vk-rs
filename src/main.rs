@@ -113,10 +113,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                             e_pressed = false;
                         }
                         (ElementState::Released, Some(VirtualKeyCode::R)) => {
-                            /*renderer.wait_idle();
-                            renderer
-                                .load_model("models/cube.obj", "textures/cube.png", false)
-                                .expect("Error replacing model !");*/
                             renderer.camera.x = 0.0;
                             renderer.camera.y = 0.0;
                             renderer.camera.z = 0.0;

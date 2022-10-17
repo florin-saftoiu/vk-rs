@@ -36,6 +36,7 @@ pub struct Model {
     texture_image: vk::Image,
     texture_image_memory: vk::DeviceMemory,
     texture_image_view: vk::ImageView,
+    descriptor_sets: Vec<vk::DescriptorSet>,
 }
 
 impl Model {
@@ -77,6 +78,10 @@ impl Model {
 
     pub fn texture_image_view(&self) -> vk::ImageView {
         self.texture_image_view
+    }
+
+    pub fn descriptor_sets(&self) -> &[vk::DescriptorSet] {
+        &self.descriptor_sets
     }
 
     pub fn new(
@@ -134,7 +139,7 @@ impl Model {
 
         let (texture_image, texture_image_memory) = renderer.create_texture_image(&texture)?;
         let texture_image_view = renderer.create_texture_image_view(texture_image)?;
-        renderer.update_descriptor_sets(texture_image_view)?;
+        let descriptor_sets = renderer.create_descriptor_sets(texture_image_view)?;
 
         Ok(Model {
             _vertices: vertices,
@@ -147,6 +152,7 @@ impl Model {
             texture_image,
             texture_image_memory,
             texture_image_view,
+            descriptor_sets,
         })
     }
 }
