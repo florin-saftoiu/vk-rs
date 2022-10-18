@@ -72,7 +72,8 @@ pub struct Renderer {
     swapchain_extent: vk::Extent2D,
     swapchain_image_views: Vec<vk::ImageView>,
     render_pass: vk::RenderPass,
-    descriptor_set_layout: vk::DescriptorSetLayout,
+    global_descriptor_set_layout: vk::DescriptorSetLayout,
+    model_descriptor_set_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
     graphics_pipeline: vk::Pipeline,
     swapchain_framebuffers: Vec<vk::Framebuffer>,
@@ -89,6 +90,7 @@ pub struct Renderer {
     uniform_buffers: Vec<vk::Buffer>,
     uniform_buffers_memory: Vec<vk::DeviceMemory>,
     descriptor_pool: vk::DescriptorPool,
+    global_descriptor_sets: Vec<vk::DescriptorSet>,
     texture_sampler: vk::Sampler,
     depth_image: vk::Image,
     depth_image_memory: vk::DeviceMemory,
@@ -187,7 +189,10 @@ impl Renderer {
             &self.device,
             swapchain_extent,
             render_pass,
-            self.descriptor_set_layout,
+            &[
+                self.global_descriptor_set_layout,
+                self.model_descriptor_set_layout,
+            ],
         )?;
 
         let (depth_image, depth_image_memory, depth_image_view) = Self::create_depth_resources(
@@ -346,6 +351,19 @@ impl Renderer {
         #[cfg(debug_assertions)]
         println!("Bind graphics pipeline command added.");
 
+        unsafe {
+            self.device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                0,
+                &[self.global_descriptor_sets[self.current_frame]],
+                &[],
+            )
+        };
+        #[cfg(debug_assertions)]
+        println!("Bind global descriptor sets command added.");
+
         for model in self.models.iter() {
             unsafe {
                 self.device.cmd_bind_vertex_buffers(
@@ -374,13 +392,13 @@ impl Renderer {
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     self.pipeline_layout,
-                    0,
+                    1,
                     &[model.descriptor_sets()[self.current_frame]],
                     &[],
                 )
             };
             #[cfg(debug_assertions)]
-            println!("Bind descriptor sets command added.");
+            println!("Bind model descriptor sets command added.");
 
             unsafe {
                 self.device.cmd_draw_indexed(
@@ -652,7 +670,7 @@ impl Renderer {
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: (MAX_MODELS * MAX_FRAMES_IN_FLIGHT) as u32,
+                descriptor_count: MAX_FRAMES_IN_FLIGHT as u32,
                 ..Default::default()
             },
             vk::DescriptorPoolSize {
@@ -664,7 +682,7 @@ impl Renderer {
         let pool_info = vk::DescriptorPoolCreateInfo {
             pool_size_count: pool_sizes.len() as u32,
             p_pool_sizes: pool_sizes.as_ptr(),
-            max_sets: (MAX_MODELS * MAX_FRAMES_IN_FLIGHT) as u32,
+            max_sets: ((1 + MAX_MODELS) * MAX_FRAMES_IN_FLIGHT) as u32,
             ..Default::default()
         };
         let descriptor_pool = unsafe { device.create_descriptor_pool(&pool_info, None) }?;
@@ -674,11 +692,49 @@ impl Renderer {
         Ok(descriptor_pool)
     }
 
-    fn create_descriptor_sets(
+    fn create_global_descriptor_sets(
+        device: &Device,
+        descriptor_pool: vk::DescriptorPool,
+        descriptor_set_layout: vk::DescriptorSetLayout,
+        uniform_buffers: &[vk::Buffer],
+    ) -> Result<Vec<vk::DescriptorSet>, Box<dyn Error>> {
+        let layouts = vec![descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
+        let alloc_info = vk::DescriptorSetAllocateInfo {
+            descriptor_pool: descriptor_pool,
+            descriptor_set_count: MAX_FRAMES_IN_FLIGHT as u32,
+            p_set_layouts: layouts.as_ptr(),
+            ..Default::default()
+        };
+        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&alloc_info) }?;
+        #[cfg(debug_assertions)]
+        println!("Global descriptor sets created.");
+
+        for i in 0..MAX_FRAMES_IN_FLIGHT {
+            let buffer_info = vk::DescriptorBufferInfo {
+                buffer: uniform_buffers[i],
+                offset: 0,
+                range: std::mem::size_of::<UniformBufferObject>() as u64,
+            };
+            let descriptor_writes = [vk::WriteDescriptorSet {
+                dst_set: descriptor_sets[i],
+                dst_binding: 0,
+                dst_array_element: 0,
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: 1,
+                p_buffer_info: &buffer_info,
+                ..Default::default()
+            }];
+            unsafe { device.update_descriptor_sets(&descriptor_writes, &[]) };
+        }
+
+        Ok(descriptor_sets)
+    }
+
+    fn create_model_descriptor_sets(
         &self,
         texture_image_view: vk::ImageView,
     ) -> Result<Vec<vk::DescriptorSet>, Box<dyn Error>> {
-        let layouts = vec![self.descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
+        let layouts = vec![self.model_descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
         let alloc_info = vk::DescriptorSetAllocateInfo {
             descriptor_pool: self.descriptor_pool,
             descriptor_set_count: MAX_FRAMES_IN_FLIGHT as u32,
@@ -687,39 +743,23 @@ impl Renderer {
         };
         let descriptor_sets = unsafe { self.device.allocate_descriptor_sets(&alloc_info) }?;
         #[cfg(debug_assertions)]
-        println!("Descriptor sets created.");
+        println!("Model descriptor sets created.");
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
-            let buffer_info = vk::DescriptorBufferInfo {
-                buffer: self.uniform_buffers[i],
-                offset: 0,
-                range: std::mem::size_of::<UniformBufferObject>() as u64,
-            };
             let image_info = vk::DescriptorImageInfo {
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 image_view: texture_image_view,
                 sampler: self.texture_sampler,
             };
-            let descriptor_writes = [
-                vk::WriteDescriptorSet {
-                    dst_set: descriptor_sets[i],
-                    dst_binding: 0,
-                    dst_array_element: 0,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    descriptor_count: 1,
-                    p_buffer_info: &buffer_info,
-                    ..Default::default()
-                },
-                vk::WriteDescriptorSet {
-                    dst_set: descriptor_sets[i],
-                    dst_binding: 1,
-                    dst_array_element: 0,
-                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                    descriptor_count: 1,
-                    p_image_info: &image_info,
-                    ..Default::default()
-                },
-            ];
+            let descriptor_writes = [vk::WriteDescriptorSet {
+                dst_set: descriptor_sets[i],
+                dst_binding: 0,
+                dst_array_element: 0,
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                descriptor_count: 1,
+                p_image_info: &image_info,
+                ..Default::default()
+            }];
             unsafe { self.device.update_descriptor_sets(&descriptor_writes, &[]) };
         }
 
@@ -1263,25 +1303,37 @@ impl Renderer {
         Ok(shader_module)
     }
 
-    fn create_descriptor_set_layout(
+    fn create_global_descriptor_set_layout(
         device: &Device,
     ) -> Result<vk::DescriptorSetLayout, Box<dyn Error>> {
-        let bindings = [
-            vk::DescriptorSetLayoutBinding {
-                binding: 0,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: 1,
-                stage_flags: vk::ShaderStageFlags::VERTEX,
-                ..Default::default()
-            },
-            vk::DescriptorSetLayoutBinding {
-                binding: 1,
-                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: 1,
-                stage_flags: vk::ShaderStageFlags::FRAGMENT,
-                ..Default::default()
-            },
-        ];
+        let bindings = [vk::DescriptorSetLayoutBinding {
+            binding: 0,
+            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::VERTEX,
+            ..Default::default()
+        }];
+        let layout_info = vk::DescriptorSetLayoutCreateInfo {
+            binding_count: bindings.len() as u32,
+            p_bindings: bindings.as_ptr(),
+            ..Default::default()
+        };
+        let descriptor_set_layout =
+            unsafe { device.create_descriptor_set_layout(&layout_info, None) }?;
+
+        Ok(descriptor_set_layout)
+    }
+
+    fn create_model_descriptor_set_layout(
+        device: &Device,
+    ) -> Result<vk::DescriptorSetLayout, Box<dyn Error>> {
+        let bindings = [vk::DescriptorSetLayoutBinding {
+            binding: 0,
+            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::FRAGMENT,
+            ..Default::default()
+        }];
         let layout_info = vk::DescriptorSetLayoutCreateInfo {
             binding_count: bindings.len() as u32,
             p_bindings: bindings.as_ptr(),
@@ -1297,7 +1349,7 @@ impl Renderer {
         device: &Device,
         swapchain_extent: vk::Extent2D,
         render_pass: vk::RenderPass,
-        descriptor_set_layout: vk::DescriptorSetLayout,
+        descriptor_set_layouts: &[vk::DescriptorSetLayout],
     ) -> Result<(vk::PipelineLayout, vk::Pipeline), Box<dyn Error>> {
         let vert_shader = tools::read_shader(Path::new("shaders/vert.spv"))?;
         let vert_shader_module = Self::create_shader_module(device, &vert_shader)?;
@@ -1400,8 +1452,8 @@ impl Renderer {
         };
 
         let pipeline_layout_info = vk::PipelineLayoutCreateInfo {
-            set_layout_count: 1,
-            p_set_layouts: &descriptor_set_layout as *const vk::DescriptorSetLayout,
+            set_layout_count: descriptor_set_layouts.len() as u32,
+            p_set_layouts: descriptor_set_layouts.as_ptr(),
             ..Default::default()
         };
 
@@ -2143,13 +2195,14 @@ impl Renderer {
         let render_pass =
             Self::create_render_pass(&device, &instance, physical_device, swapchain_image_format)?;
 
-        let descriptor_set_layout = Self::create_descriptor_set_layout(&device)?;
+        let global_descriptor_set_layout = Self::create_global_descriptor_set_layout(&device)?;
+        let model_descriptor_set_layout = Self::create_model_descriptor_set_layout(&device)?;
 
         let (pipeline_layout, graphics_pipeline) = Self::create_graphics_pipeline(
             &device,
             swapchain_extent,
             render_pass,
-            descriptor_set_layout,
+            &[global_descriptor_set_layout, model_descriptor_set_layout],
         )?;
 
         let command_pool = Self::create_command_pool(&device, &queue_family_indices)?;
@@ -2178,6 +2231,13 @@ impl Renderer {
 
         let descriptor_pool = Self::create_descriptor_pool(&device)?;
 
+        let global_descriptor_sets = Self::create_global_descriptor_sets(
+            &device,
+            descriptor_pool,
+            global_descriptor_set_layout,
+            &uniform_buffers,
+        )?;
+
         let command_buffers = Self::create_command_buffers(&device, command_pool)?;
 
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
@@ -2202,7 +2262,8 @@ impl Renderer {
             swapchain_extent,
             swapchain_image_views,
             render_pass,
-            descriptor_set_layout,
+            global_descriptor_set_layout,
+            model_descriptor_set_layout,
             pipeline_layout,
             graphics_pipeline,
             swapchain_framebuffers,
@@ -2219,6 +2280,7 @@ impl Renderer {
             uniform_buffers,
             uniform_buffers_memory,
             descriptor_pool,
+            global_descriptor_sets,
             texture_sampler,
             depth_image,
             depth_image_memory,
@@ -2433,10 +2495,17 @@ impl Drop for Renderer {
 
         unsafe {
             self.device
-                .destroy_descriptor_set_layout(self.descriptor_set_layout, None)
+                .destroy_descriptor_set_layout(self.model_descriptor_set_layout, None)
         };
         #[cfg(debug_assertions)]
-        println!("Descriptor set layout dropped.");
+        println!("Model descriptor set layout dropped.");
+
+        unsafe {
+            self.device
+                .destroy_descriptor_set_layout(self.global_descriptor_set_layout, None)
+        };
+        #[cfg(debug_assertions)]
+        println!("Global descriptor set layout dropped.");
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             unsafe {

@@ -139,7 +139,7 @@ impl Model {
 
         let (texture_image, texture_image_memory) = renderer.create_texture_image(&texture)?;
         let texture_image_view = renderer.create_texture_image_view(texture_image)?;
-        let descriptor_sets = renderer.create_descriptor_sets(texture_image_view)?;
+        let descriptor_sets = renderer.create_model_descriptor_sets(texture_image_view)?;
 
         Ok(Model {
             _vertices: vertices,
