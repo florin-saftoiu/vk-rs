@@ -652,12 +652,12 @@ impl Renderer {
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: MAX_FRAMES_IN_FLIGHT as u32,
+                descriptor_count: (MAX_MODELS * MAX_FRAMES_IN_FLIGHT) as u32,
                 ..Default::default()
             },
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: MAX_FRAMES_IN_FLIGHT as u32,
+                descriptor_count: (MAX_MODELS * MAX_FRAMES_IN_FLIGHT) as u32,
                 ..Default::default()
             },
         ];
