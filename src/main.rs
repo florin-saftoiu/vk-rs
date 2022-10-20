@@ -52,6 +52,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut q_pressed = false;
     let mut e_pressed = false;
 
+    let mut up_pressed = false;
+    let mut down_pressed = false;
+    let mut left_pressed = false;
+    let mut right_pressed = false;
+
     let mut yaw = 0.0;
     let mut pitch = 0.0;
 
@@ -118,6 +123,30 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                         (ElementState::Released, Some(VirtualKeyCode::E)) => {
                             e_pressed = false;
+                        }
+                        (ElementState::Pressed, Some(VirtualKeyCode::Up)) => {
+                            up_pressed = true;
+                        }
+                        (ElementState::Released, Some(VirtualKeyCode::Up)) => {
+                            up_pressed = false;
+                        }
+                        (ElementState::Pressed, Some(VirtualKeyCode::Down)) => {
+                            down_pressed = true;
+                        }
+                        (ElementState::Released, Some(VirtualKeyCode::Down)) => {
+                            down_pressed = false;
+                        }
+                        (ElementState::Pressed, Some(VirtualKeyCode::Left)) => {
+                            left_pressed = true;
+                        }
+                        (ElementState::Released, Some(VirtualKeyCode::Left)) => {
+                            left_pressed = false;
+                        }
+                        (ElementState::Pressed, Some(VirtualKeyCode::Right)) => {
+                            right_pressed = true;
+                        }
+                        (ElementState::Released, Some(VirtualKeyCode::Right)) => {
+                            right_pressed = false;
                         }
                         (ElementState::Released, Some(VirtualKeyCode::R)) => {
                             renderer.camera.x = 0.0;
@@ -198,6 +227,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
 
                     renderer.target = renderer.camera - look_dir;
+
+                    if up_pressed {
+                        renderer.models()[0].position.z -= 8.0 * time;
+                    }
+
+                    if down_pressed {
+                        renderer.models()[0].position.z += 8.0 * time;
+                    }
+
+                    if left_pressed {
+                        renderer.models()[0].position.x -= 8.0 * time;
+                    }
+
+                    if right_pressed {
+                        renderer.models()[0].position.x += 8.0 * time;
+                    }
 
                     renderer.draw_frame();
                     window.set_title(
