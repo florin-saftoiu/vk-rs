@@ -1,6 +1,7 @@
 use std::{collections::HashMap, error::Error, path::Path};
 
 use ash::vk;
+use cgmath::Point3;
 use tobj::LoadOptions;
 
 use super::{types::Vertex, Renderer};
@@ -39,6 +40,8 @@ pub struct Model {
     uniform_buffers: Vec<vk::Buffer>,
     uniform_buffers_memory: Vec<vk::DeviceMemory>,
     descriptor_sets: Vec<vk::DescriptorSet>,
+    pub position: Point3<f32>,
+    pub theta: f32,
 }
 
 impl Model {
@@ -167,6 +170,12 @@ impl Model {
             uniform_buffers,
             uniform_buffers_memory,
             descriptor_sets,
+            position: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            theta: 0.0,
         })
     }
 }

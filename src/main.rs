@@ -32,7 +32,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
     renderer.load_model("models/cube.obj", "textures/cube.png", false)?;
     renderer.load_model("models/viking_room.obj", "textures/viking_room.png", false)?;
-    renderer.theta = -90.0;
+    renderer.models()[0].position.x = -5.0;
+    renderer.models()[0].position.y = -0.25;
+    renderer.models()[0].position.z = -6.0;
+    renderer.models()[0].theta = 0.0;
+    renderer.models()[1].position.x = 0.0;
+    renderer.models()[1].position.y = -0.25;
+    renderer.models()[1].position.z = -6.0;
+    renderer.models()[1].theta = -90.0;
     let mut minimized = false;
     let mut tp1 = Instant::now();
 

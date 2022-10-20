@@ -101,6 +101,10 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    pub fn models(&mut self) -> &mut [Model] {
+        &mut self.models
+    }
+
     fn cleanup_swapchain(&mut self) {
         unsafe { self.device.destroy_image_view(self.depth_image_view, None) };
         #[cfg(debug_assertions)]
@@ -2412,9 +2416,12 @@ impl Renderer {
     fn update_model_uniform_buffer(&self, current_image: usize, model: &Model) {
         let ubo = UniformBufferObject {
             model: Align16(
-                Matrix4::from_translation(Vector3::new(0.0, -0.25, -6.0))
-                    * Matrix4::from_angle_y(Deg(self.theta))
-                    * Matrix4::from_angle_x(Deg(self.theta)),
+                Matrix4::from_translation(Vector3::new(
+                    model.position.x,
+                    model.position.y,
+                    model.position.z,
+                )) * Matrix4::from_angle_y(Deg(model.theta))
+                    * Matrix4::from_angle_x(Deg(model.theta)),
             ),
             view: Align16(Matrix4::identity()),
             proj: Align16(Matrix4::identity()),
