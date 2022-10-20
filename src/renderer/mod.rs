@@ -13,7 +13,7 @@ use ash::{
     extensions::khr::{Surface, Swapchain},
     vk, Device, Entry, Instance,
 };
-use cgmath::{Deg, Matrix4, Point3, Vector3};
+use cgmath::{Deg, Matrix4, Point3, SquareMatrix, Vector3};
 
 use model::{Model, Texture};
 use types::{Align16, QueueFamilyIndices, SwapchainSupportDetails, UniformBufferObject, Vertex};
@@ -87,8 +87,8 @@ pub struct Renderer {
     height: u32,
     framebuffer_resized: bool,
     models: Vec<Model>,
-    uniform_buffers: Vec<vk::Buffer>,
-    uniform_buffers_memory: Vec<vk::DeviceMemory>,
+    global_uniform_buffers: Vec<vk::Buffer>,
+    global_uniform_buffers_memory: Vec<vk::DeviceMemory>,
     descriptor_pool: vk::DescriptorPool,
     global_descriptor_sets: Vec<vk::DescriptorSet>,
     texture_sampler: vk::Sampler,
@@ -229,6 +229,16 @@ impl Renderer {
     }
 
     fn cleanup_model(&self, model: &Model) {
+        for i in 0..MAX_FRAMES_IN_FLIGHT {
+            unsafe { self.device.destroy_buffer(model.uniform_buffers()[i], None) };
+            unsafe {
+                self.device
+                    .free_memory(model.uniform_buffers_memory()[i], None)
+            };
+        }
+        #[cfg(debug_assertions)]
+        println!("Uniform buffers dropped and uniform buffers memory freed.");
+
         unsafe {
             self.device
                 .destroy_image_view(model.texture_image_view(), None)
@@ -638,7 +648,7 @@ impl Renderer {
         Ok((index_buffer, index_buffer_memory))
     }
 
-    fn create_uniform_buffers(
+    fn create_global_uniform_buffers(
         instance: &Instance,
         physical_device: &vk::PhysicalDevice,
         device: &Device,
@@ -666,11 +676,37 @@ impl Renderer {
         Ok((uniform_buffers, uniform_buffers_memory))
     }
 
+    fn create_model_uniform_buffers(
+        &self,
+    ) -> Result<(Vec<vk::Buffer>, Vec<vk::DeviceMemory>), Box<dyn Error>> {
+        let buffer_size = std::mem::size_of::<UniformBufferObject>() as u64;
+
+        let mut uniform_buffers = vec![];
+        let mut uniform_buffers_memory = vec![];
+        for _ in 0..MAX_FRAMES_IN_FLIGHT {
+            let (uniform_buffer, uniform_buffer_memory) = Self::create_buffer(
+                &self.instance,
+                &self.physical_device,
+                &self.device,
+                buffer_size,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?;
+            uniform_buffers.push(uniform_buffer);
+            uniform_buffers_memory.push(uniform_buffer_memory);
+        }
+
+        #[cfg(debug_assertions)]
+        println!("Uniform buffers and uniform buffers memory created.");
+
+        Ok((uniform_buffers, uniform_buffers_memory))
+    }
+
     fn create_descriptor_pool(device: &Device) -> Result<vk::DescriptorPool, Box<dyn Error>> {
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: MAX_FRAMES_IN_FLIGHT as u32,
+                descriptor_count: ((1 + MAX_MODELS) * MAX_FRAMES_IN_FLIGHT) as u32,
                 ..Default::default()
             },
             vk::DescriptorPoolSize {
@@ -732,6 +768,7 @@ impl Renderer {
 
     fn create_model_descriptor_sets(
         &self,
+        uniform_buffers: &[vk::Buffer],
         texture_image_view: vk::ImageView,
     ) -> Result<Vec<vk::DescriptorSet>, Box<dyn Error>> {
         let layouts = vec![self.model_descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
@@ -746,20 +783,36 @@ impl Renderer {
         println!("Model descriptor sets created.");
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
+            let buffer_info = vk::DescriptorBufferInfo {
+                buffer: uniform_buffers[i],
+                offset: 0,
+                range: std::mem::size_of::<UniformBufferObject>() as u64,
+            };
             let image_info = vk::DescriptorImageInfo {
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 image_view: texture_image_view,
                 sampler: self.texture_sampler,
             };
-            let descriptor_writes = [vk::WriteDescriptorSet {
-                dst_set: descriptor_sets[i],
-                dst_binding: 0,
-                dst_array_element: 0,
-                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: 1,
-                p_image_info: &image_info,
-                ..Default::default()
-            }];
+            let descriptor_writes = [
+                vk::WriteDescriptorSet {
+                    dst_set: descriptor_sets[i],
+                    dst_binding: 0,
+                    dst_array_element: 0,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    descriptor_count: 1,
+                    p_buffer_info: &buffer_info,
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_set: descriptor_sets[i],
+                    dst_binding: 1,
+                    dst_array_element: 0,
+                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    descriptor_count: 1,
+                    p_image_info: &image_info,
+                    ..Default::default()
+                },
+            ];
             unsafe { self.device.update_descriptor_sets(&descriptor_writes, &[]) };
         }
 
@@ -1327,13 +1380,22 @@ impl Renderer {
     fn create_model_descriptor_set_layout(
         device: &Device,
     ) -> Result<vk::DescriptorSetLayout, Box<dyn Error>> {
-        let bindings = [vk::DescriptorSetLayoutBinding {
-            binding: 0,
-            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::FRAGMENT,
-            ..Default::default()
-        }];
+        let bindings = [
+            vk::DescriptorSetLayoutBinding {
+                binding: 0,
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: 1,
+                stage_flags: vk::ShaderStageFlags::VERTEX,
+                ..Default::default()
+            },
+            vk::DescriptorSetLayoutBinding {
+                binding: 1,
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                descriptor_count: 1,
+                stage_flags: vk::ShaderStageFlags::FRAGMENT,
+                ..Default::default()
+            },
+        ];
         let layout_info = vk::DescriptorSetLayoutCreateInfo {
             binding_count: bindings.len() as u32,
             p_bindings: bindings.as_ptr(),
@@ -2226,8 +2288,8 @@ impl Renderer {
 
         let texture_sampler = Self::create_texture_sampler(&instance, physical_device, &device)?;
 
-        let (uniform_buffers, uniform_buffers_memory) =
-            Self::create_uniform_buffers(&instance, &physical_device, &device)?;
+        let (global_uniform_buffers, global_uniform_buffers_memory) =
+            Self::create_global_uniform_buffers(&instance, &physical_device, &device)?;
 
         let descriptor_pool = Self::create_descriptor_pool(&device)?;
 
@@ -2235,7 +2297,7 @@ impl Renderer {
             &device,
             descriptor_pool,
             global_descriptor_set_layout,
-            &uniform_buffers,
+            &global_uniform_buffers,
         )?;
 
         let command_buffers = Self::create_command_buffers(&device, command_pool)?;
@@ -2277,8 +2339,8 @@ impl Renderer {
             height,
             framebuffer_resized: false,
             models: vec![],
-            uniform_buffers,
-            uniform_buffers_memory,
+            global_uniform_buffers,
+            global_uniform_buffers_memory,
             descriptor_pool,
             global_descriptor_sets,
             texture_sampler,
@@ -2311,13 +2373,9 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn update_uniform_buffer(&mut self, current_image: usize) {
+    fn update_global_uniform_buffer(&self, current_image: usize) {
         let mut ubo = UniformBufferObject {
-            model: Align16(
-                Matrix4::from_translation(Vector3::new(0.0, -0.25, -6.0))
-                    * Matrix4::from_angle_y(Deg(self.theta))
-                    * Matrix4::from_angle_x(Deg(self.theta)),
-            ),
+            model: Align16(Matrix4::identity()),
             view: Align16(Matrix4::look_at_lh(
                 self.camera,
                 self.target,
@@ -2334,7 +2392,7 @@ impl Renderer {
 
         let data = unsafe {
             self.device.map_memory(
-                self.uniform_buffers_memory[current_image],
+                self.global_uniform_buffers_memory[current_image],
                 0,
                 std::mem::size_of::<UniformBufferObject>() as u64,
                 vk::MemoryMapFlags::empty(),
@@ -2345,7 +2403,37 @@ impl Renderer {
         unsafe { data.copy_from_nonoverlapping(&ubo as *const UniformBufferObject, 1) };
         unsafe {
             self.device
-                .unmap_memory(self.uniform_buffers_memory[current_image])
+                .unmap_memory(self.global_uniform_buffers_memory[current_image])
+        };
+        #[cfg(debug_assertions)]
+        println!("Uniform buffer memory copied.");
+    }
+
+    fn update_model_uniform_buffer(&self, current_image: usize, model: &Model) {
+        let ubo = UniformBufferObject {
+            model: Align16(
+                Matrix4::from_translation(Vector3::new(0.0, -0.25, -6.0))
+                    * Matrix4::from_angle_y(Deg(self.theta))
+                    * Matrix4::from_angle_x(Deg(self.theta)),
+            ),
+            view: Align16(Matrix4::identity()),
+            proj: Align16(Matrix4::identity()),
+        };
+
+        let data = unsafe {
+            self.device.map_memory(
+                model.uniform_buffers_memory()[current_image],
+                0,
+                std::mem::size_of::<UniformBufferObject>() as u64,
+                vk::MemoryMapFlags::empty(),
+            )
+        }
+        .expect("Error mapping memory to uniform buffer !")
+            as *mut UniformBufferObject;
+        unsafe { data.copy_from_nonoverlapping(&ubo as *const UniformBufferObject, 1) };
+        unsafe {
+            self.device
+                .unmap_memory(model.uniform_buffers_memory()[current_image])
         };
         #[cfg(debug_assertions)]
         println!("Uniform buffer memory copied.");
@@ -2380,7 +2468,10 @@ impl Renderer {
             },
         };
 
-        self.update_uniform_buffer(self.current_frame);
+        self.update_global_uniform_buffer(self.current_frame);
+        for model in self.models.iter() {
+            self.update_model_uniform_buffer(self.current_frame, model);
+        }
 
         unsafe {
             self.device
@@ -2477,10 +2568,13 @@ impl Drop for Renderer {
         println!("Texture sampler dropped.");
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
-            unsafe { self.device.destroy_buffer(self.uniform_buffers[i], None) };
             unsafe {
                 self.device
-                    .free_memory(self.uniform_buffers_memory[i], None)
+                    .destroy_buffer(self.global_uniform_buffers[i], None)
+            };
+            unsafe {
+                self.device
+                    .free_memory(self.global_uniform_buffers_memory[i], None)
             };
         }
         #[cfg(debug_assertions)]
