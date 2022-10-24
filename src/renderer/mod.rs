@@ -101,8 +101,8 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn models(&mut self) -> &mut [Model] {
-        &mut self.models
+    pub fn model(&mut self, i: usize) -> &mut Model {
+        &mut self.models[i]
     }
 
     fn cleanup_swapchain(&mut self) {
@@ -2370,11 +2370,11 @@ impl Renderer {
         obj: &str,
         texture: &str,
         triangulate: bool,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<usize, Box<dyn Error>> {
         self.models
             .push(Model::new(&self, obj, texture, triangulate)?);
 
-        Ok(())
+        Ok(self.models.len() - 1)
     }
 
     fn update_global_uniform_buffer(&self, current_image: usize) {
