@@ -43,22 +43,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut minimized = false;
     let mut tp1 = Instant::now();
 
-    let mut w_pressed = false;
-    let mut s_pressed = false;
-    let mut a_pressed = false;
-    let mut d_pressed = false;
-    let mut space_pressed = false;
-    let mut c_pressed = false;
-    let mut q_pressed = false;
-    let mut e_pressed = false;
-
-    let mut up_pressed = false;
-    let mut down_pressed = false;
-    let mut left_pressed = false;
-    let mut right_pressed = false;
-
     let mut yaw = 0.0;
     let mut pitch = 0.0;
+
+    let mut keys = [false; 256];
 
     // Main Loop
     event_loop.run(move |event, _, control_flow| {
@@ -67,96 +55,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         match event {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                WindowEvent::KeyboardInput { input, .. } => match input {
-                    KeyboardInput {
-                        state,
-                        virtual_keycode,
-                        ..
-                    } => match (state, virtual_keycode) {
-                        (ElementState::Pressed, Some(VirtualKeyCode::Escape)) => {
-                            *control_flow = ControlFlow::Exit
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::W)) => {
-                            w_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::W)) => {
-                            w_pressed = false;
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::S)) => {
-                            s_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::S)) => {
-                            s_pressed = false;
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::A)) => {
-                            a_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::A)) => {
-                            a_pressed = false;
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::D)) => {
-                            d_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::D)) => {
-                            d_pressed = false;
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::Space)) => {
-                            space_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::Space)) => {
-                            space_pressed = false;
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::C)) => {
-                            c_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::C)) => {
-                            c_pressed = false;
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::Q)) => {
-                            q_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::Q)) => {
-                            q_pressed = false;
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::E)) => {
-                            e_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::E)) => {
-                            e_pressed = false;
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::Up)) => {
-                            up_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::Up)) => {
-                            up_pressed = false;
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::Down)) => {
-                            down_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::Down)) => {
-                            down_pressed = false;
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::Left)) => {
-                            left_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::Left)) => {
-                            left_pressed = false;
-                        }
-                        (ElementState::Pressed, Some(VirtualKeyCode::Right)) => {
-                            right_pressed = true;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::Right)) => {
-                            right_pressed = false;
-                        }
-                        (ElementState::Released, Some(VirtualKeyCode::R)) => {
-                            renderer.camera.x = 0.0;
-                            renderer.camera.y = 0.0;
-                            renderer.camera.z = 0.0;
-                            yaw = 0.0;
-                            pitch = 0.0;
-                        }
-                        _ => (),
-                    },
+                WindowEvent::KeyboardInput {
+                    input:
+                        KeyboardInput {
+                            state,
+                            virtual_keycode: Some(keycode),
+                            ..
+                        },
+                    ..
+                } => match (state, keycode) {
+                    (ElementState::Pressed, VirtualKeyCode::Escape) => {
+                        *control_flow = ControlFlow::Exit
+                    }
+                    (ElementState::Released, VirtualKeyCode::R) => {
+                        renderer.camera.x = 0.0;
+                        renderer.camera.y = 0.0;
+                        renderer.camera.z = 0.0;
+                        yaw = 0.0;
+                        pitch = 0.0;
+                    }
+                    (ElementState::Pressed, _) => keys[keycode as usize] = true,
+                    (ElementState::Released, _) => keys[keycode as usize] = false,
                 },
                 WindowEvent::Resized(size) => {
                     if size.width == 0 || size.height == 0 {
@@ -193,54 +112,54 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let right =
                         look_dir.cross(Vector3::new(0.0, 1.0, 0.0)).normalize() * 6.0 * time;
 
-                    if w_pressed {
+                    if keys[VirtualKeyCode::W as usize] {
                         // move forward
                         renderer.camera += forward;
                     }
-                    if s_pressed {
+                    if keys[VirtualKeyCode::S as usize] {
                         // move backwards
                         renderer.camera -= forward;
                     }
-                    if a_pressed {
+                    if keys[VirtualKeyCode::A as usize] {
                         // strafe left
                         renderer.camera -= right;
                     }
-                    if d_pressed {
+                    if keys[VirtualKeyCode::D as usize] {
                         // strafe right
                         renderer.camera += right;
                     }
-                    if space_pressed {
+                    if keys[VirtualKeyCode::Space as usize] {
                         // move up
                         renderer.camera.y += 6.0 * time;
                     }
-                    if c_pressed {
+                    if keys[VirtualKeyCode::C as usize] {
                         // move down
                         renderer.camera.y -= 6.0 * time;
                     }
-                    if q_pressed {
+                    if keys[VirtualKeyCode::Q as usize] {
                         // look left
                         yaw += 20.0 * time;
                     }
-                    if e_pressed {
+                    if keys[VirtualKeyCode::E as usize] {
                         // look right
                         yaw -= 20.0 * time;
                     }
 
                     renderer.target = renderer.camera - look_dir;
 
-                    if up_pressed {
+                    if keys[VirtualKeyCode::Up as usize] {
                         renderer.model(m0).position.z -= 8.0 * time;
                     }
 
-                    if down_pressed {
+                    if keys[VirtualKeyCode::Down as usize] {
                         renderer.model(m0).position.z += 8.0 * time;
                     }
 
-                    if left_pressed {
+                    if keys[VirtualKeyCode::Left as usize] {
                         renderer.model(m0).position.x -= 8.0 * time;
                     }
 
-                    if right_pressed {
+                    if keys[VirtualKeyCode::Right as usize] {
                         renderer.model(m0).position.x += 8.0 * time;
                     }
 
