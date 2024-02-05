@@ -2106,6 +2106,19 @@ impl Renderer {
         Ok(true)
     }
 
+    fn new_debug_utils_messenger_create_info() -> vk::DebugUtilsMessengerCreateInfoEXT {
+        vk::DebugUtilsMessengerCreateInfoEXT {
+            message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+            message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+            pfn_user_callback: Some(vk_debug_utils_callback),
+            ..Default::default()
+        }
+    }
+
     pub fn new(
         display_handle: raw_window_handle::RawDisplayHandle,
         window_handle: raw_window_handle::RawWindowHandle,
@@ -2148,16 +2161,7 @@ impl Renderer {
                     .collect::<Vec<*const i8>>();
 
                 let instance_debug_utils_messenger_create_info =
-                    vk::DebugUtilsMessengerCreateInfoEXT {
-                        message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
-                            | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                            | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-                        message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
-                        pfn_user_callback: Some(vk_debug_utils_callback),
-                        ..Default::default()
-                    };
+                    Self::new_debug_utils_messenger_create_info();
 
                 let create_info = vk::InstanceCreateInfo {
                     p_next: &instance_debug_utils_messenger_create_info
@@ -2175,16 +2179,7 @@ impl Renderer {
                 println!("Vulkan instance created.");
 
                 let debug_utils_loader = DebugUtils::new(&entry, &instance);
-                let messenger_create_info = vk::DebugUtilsMessengerCreateInfoEXT {
-                    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-                    message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
-                    pfn_user_callback: Some(vk_debug_utils_callback),
-                    ..Default::default()
-                };
+                let messenger_create_info = Self::new_debug_utils_messenger_create_info();
                 let debug_utils_messenger = unsafe {
                     debug_utils_loader.create_debug_utils_messenger(&messenger_create_info, None)
                 }?;
