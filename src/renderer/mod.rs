@@ -1983,6 +1983,12 @@ impl Renderer {
                     pp_enabled_layer_names: p_enabled_layer_names.as_ptr(),
                     ..Default::default()
                 };
+
+                let device = unsafe { instance.create_device(physical_device, &device_create_info, None) }?;
+                #[cfg(debug_assertions)]
+                println!("Logical device created.");
+
+                Ok(device)
             } else {
                 device_create_info = vk::DeviceCreateInfo {
                     p_queue_create_infos: &device_queue_create_info,
@@ -1993,6 +1999,12 @@ impl Renderer {
                     enabled_layer_count: 0,
                     ..Default::default()
                 };
+
+                let device = unsafe { instance.create_device(physical_device, &device_create_info, None) }?;
+                #[cfg(debug_assertions)]
+                println!("Logical device created.");
+
+                Ok(device)
             }
         }
 
@@ -2007,13 +2019,14 @@ impl Renderer {
                 enabled_layer_count: 0,
                 ..Default::default()
             };
+
+
+            let device = unsafe { instance.create_device(physical_device, &device_create_info, None) }?;
+            #[cfg(debug_assertions)]
+            println!("Logical device created.");
+
+            Ok(device)
         }
-
-        let device = unsafe { instance.create_device(physical_device, &device_create_info, None) }?;
-        #[cfg(debug_assertions)]
-        println!("Logical device created.");
-
-        Ok(device)
     }
 
     #[cfg(debug_assertions)]
