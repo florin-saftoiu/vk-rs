@@ -444,7 +444,7 @@ impl Renderer {
         command_pool: vk::CommandPool,
     ) -> Result<Vec<vk::CommandBuffer>, Box<dyn Error>> {
         let alloc_info = vk::CommandBufferAllocateInfo {
-            command_pool: command_pool,
+            command_pool,
             command_buffer_count: MAX_FRAMES_IN_FLIGHT as u32,
             ..Default::default()
         };
@@ -740,7 +740,7 @@ impl Renderer {
     ) -> Result<Vec<vk::DescriptorSet>, Box<dyn Error>> {
         let layouts = vec![descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
         let alloc_info = vk::DescriptorSetAllocateInfo {
-            descriptor_pool: descriptor_pool,
+            descriptor_pool,
             descriptor_set_count: MAX_FRAMES_IN_FLIGHT as u32,
             p_set_layouts: layouts.as_ptr(),
             ..Default::default()
@@ -847,7 +847,7 @@ impl Renderer {
     ) -> Result<vk::CommandBuffer, Box<dyn Error>> {
         let alloc_info = vk::CommandBufferAllocateInfo {
             level: vk::CommandBufferLevel::PRIMARY,
-            command_pool: command_pool,
+            command_pool,
             command_buffer_count: 1,
             ..Default::default()
         };
@@ -909,16 +909,16 @@ impl Renderer {
         let image_info = vk::ImageCreateInfo {
             image_type: vk::ImageType::TYPE_2D,
             extent: vk::Extent3D {
-                width: width,
-                height: height,
+                width,
+                height,
                 depth: 1,
             },
             mip_levels: 1,
             array_layers: 1,
-            format: format,
-            tiling: tiling,
+            format,
+            tiling,
             initial_layout: vk::ImageLayout::UNDEFINED,
-            usage: usage,
+            usage,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             samples: vk::SampleCountFlags::TYPE_1,
             ..Default::default()
@@ -1060,8 +1060,8 @@ impl Renderer {
                 layer_count: 1,
                 ..Default::default()
             },
-            src_access_mask: src_access_mask,
-            dst_access_mask: dst_access_mask,
+            src_access_mask,
+            dst_access_mask,
             ..Default::default()
         };
 
@@ -1247,7 +1247,7 @@ impl Renderer {
             .map(|swapchain_image_view| {
                 let attachments = [*swapchain_image_view, *depth_image_view];
                 let framebuffer_info = vk::FramebufferCreateInfo {
-                    render_pass: render_pass,
+                    render_pass,
                     attachment_count: attachments.len() as u32,
                     p_attachments: attachments.as_ptr(),
                     width: swapchain_extent.width,
@@ -1854,7 +1854,7 @@ impl Renderer {
                 && unsafe {
                     surface_loader.get_physical_device_surface_support(
                         physical_device,
-                        index as u32,
+                        index,
                         surface,
                     )
                 }?
