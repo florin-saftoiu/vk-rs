@@ -2022,8 +2022,6 @@ impl Renderer {
 
 
             let device = unsafe { instance.create_device(physical_device, &device_create_info, None) }?;
-            #[cfg(debug_assertions)]
-            println!("Logical device created.");
 
             Ok(device)
         }
