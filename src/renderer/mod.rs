@@ -2104,6 +2104,7 @@ impl Renderer {
         Ok(true)
     }
 
+    #[cfg(debug_assertions)]
     fn new_debug_utils_messenger_create_info() -> vk::DebugUtilsMessengerCreateInfoEXT {
         vk::DebugUtilsMessengerCreateInfoEXT {
             message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
